@@ -7,24 +7,24 @@ import '/service/flutter_cart_service.dart'; // Layanan keranjang Anda
 import '/screen/product_list_screen.dart';
 import '/screen/cart_screen.dart';
 import '/screen/history_screen.dart';
-import '/service/stock_cart_service.dart'; // <-- IMPORT BARU
+import '/screen/expiry_list_screen.dart';
+import '/screen/paylater_screen.dart'; // <-- BARU: Layar Piutang
+import '/screen/dashboard_laporan_screen.dart'; // <-- BARU: Layar Laporan
+import '/service/stock_cart_service.dart';
 
+// --- (main() function is correct, no changes needed) ---
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('id_ID', null);
 
   runApp(
-    // --- PERUBAHAN DI SINI ---
-    // Gunakan MultiProvider untuk menyediakan CartService dan StockCartService
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (context) => CartService()),
-        ChangeNotifierProvider(
-            create: (context) => StockCartService()), // <-- PROVIDER BARU
+        ChangeNotifierProvider(create: (context) => StockCartService()),
       ],
       child: const MyApp(),
     ),
-    // --- AKHIR PERUBAHAN ---
   );
 }
 
@@ -36,7 +36,6 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Toko Sembako',
       theme: ThemeData(
-        // ... (Tema Anda tetap sama)
         primarySwatch: Colors.blue,
         scaffoldBackgroundColor: Colors.grey[50],
         appBarTheme: AppBarTheme(
@@ -53,8 +52,9 @@ class MyApp extends StatelessWidget {
             ),
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
           ),
-        ),
-        cardTheme: CardTheme(
+        ), // <--- !! KEMUNGKINAN BESAR ERRORNYA DI SINI (KOMA HILANG) !!
+        cardTheme: CardThemeData(
+          // <-- PERBAIKAN: Seharusnya CardThemeData
           elevation: 1,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
@@ -77,9 +77,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// ... (Sisa file main.dart (class MainScreen dan MainScreenState)
-// ... tidak perlu diubah dan tetap sama seperti sebelumnya)
-
+// --- (Class MainScreen dan _MainScreenState sudah benar, tidak ada perubahan) ---
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
 
@@ -95,12 +93,22 @@ class _MainScreenState extends State<MainScreen> {
       GlobalKey<ProductListScreenState>();
   final GlobalKey<HistoryScreenState> _historyKey =
       GlobalKey<HistoryScreenState>();
+  final GlobalKey<ExpiryListScreenState> _expiryListKey =
+      GlobalKey<ExpiryListScreenState>();
+  // <-- BARU: Key untuk layar baru
+  final GlobalKey<PayLaterScreenState> _payLaterKey =
+      GlobalKey<PayLaterScreenState>();
+  final GlobalKey<DashboardLaporanScreenState> _dashboardKey =
+      GlobalKey<DashboardLaporanScreenState>();
 
   late final List<Widget> _screens;
 
   final List<String> _titles = [
     'Daftar Barang',
     'Riwayat Transaksi',
+    'Monitoring Kadaluwarsa',
+    'Daftar Piutang (PayLater)', // <-- BARU
+    'Dashboard Laporan', // <-- BARU
   ];
 
   @override
@@ -109,6 +117,9 @@ class _MainScreenState extends State<MainScreen> {
     _screens = [
       ProductListScreen(key: _productListKey),
       HistoryScreen(key: _historyKey, selectedDate: _selectedDate),
+      ExpiryListScreen(key: _expiryListKey),
+      PayLaterScreen(key: _payLaterKey), // <-- BARU
+      DashboardLaporanScreen(key: _dashboardKey), // <-- BARU
     ];
   }
 
@@ -139,6 +150,10 @@ class _MainScreenState extends State<MainScreen> {
         _selectedDate = picked;
       });
       _updateHistoryScreen();
+      // Perbarui juga dashboard jika sedang aktif
+      if (_selectedScreenIndex == 4) {
+        _dashboardKey.currentState?.refreshData();
+      }
     }
   }
 
@@ -147,6 +162,10 @@ class _MainScreenState extends State<MainScreen> {
       _selectedDate = null;
     });
     _updateHistoryScreen();
+    // Perbarui juga dashboard jika sedang aktif
+    if (_selectedScreenIndex == 4) {
+      _dashboardKey.currentState?.refreshData();
+    }
   }
 
   @override
@@ -155,7 +174,8 @@ class _MainScreenState extends State<MainScreen> {
       appBar: AppBar(
         title: Text(_titles[_selectedScreenIndex]),
         actions: [
-          if (_selectedScreenIndex == 0 || _selectedScreenIndex == 1)
+          // Logika refresh diperbarui
+          if ([0, 1, 2, 3, 4].contains(_selectedScreenIndex))
             IconButton(
               icon: const Icon(Icons.refresh),
               onPressed: () {
@@ -163,10 +183,17 @@ class _MainScreenState extends State<MainScreen> {
                   _productListKey.currentState?.refreshProducts();
                 } else if (_selectedScreenIndex == 1) {
                   _historyKey.currentState?.refreshHistory();
+                } else if (_selectedScreenIndex == 2) {
+                  _expiryListKey.currentState?.refreshProducts();
+                } else if (_selectedScreenIndex == 3) {
+                  _payLaterKey.currentState?.refreshData();
+                } else if (_selectedScreenIndex == 4) {
+                  _dashboardKey.currentState?.refreshData();
                 }
               },
               tooltip: 'Muat Ulang Data',
             ),
+          // Filter tanggal hanya muncul di Riwayat Transaksi
           if (_selectedScreenIndex == 1) ...[
             if (_selectedDate != null)
               IconButton(
@@ -215,6 +242,25 @@ class _MainScreenState extends State<MainScreen> {
               selected: _selectedScreenIndex == 1,
               onTap: () => _selectScreen(1),
             ),
+            ListTile(
+              leading: const Icon(Icons.warning_amber_rounded),
+              title: const Text('Monitoring Kadaluwarsa'),
+              selected: _selectedScreenIndex == 2,
+              onTap: () => _selectScreen(2),
+            ),
+            ListTile(
+              leading: const Icon(Icons.credit_card_off_rounded),
+              title: const Text('Daftar Piutang (PayLater)'),
+              selected: _selectedScreenIndex == 3,
+              onTap: () => _selectScreen(3),
+            ),
+            ListTile(
+              leading: const Icon(Icons.bar_chart_rounded),
+              title: const Text('Dashboard Laporan'),
+              selected: _selectedScreenIndex == 4,
+              onTap: () => _selectScreen(4),
+            ),
+            const Divider(), // Pemisah
             ListTile(
               leading: const Icon(Icons.shopping_cart),
               title: const Text('Keranjang'),

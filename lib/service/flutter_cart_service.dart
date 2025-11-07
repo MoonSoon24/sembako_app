@@ -5,210 +5,175 @@ import '/app_config.dart';
 
 // --- MODEL DEFINITIONS ---
 
-/// Represents a single product from your spreadsheet.
+/// Mewakili satu produk dari sheet 'barang' Anda.
 class Product {
   final String nama;
   final int stok;
-  final int harga;
+  final int hargaJual;
+  final int hargaBeli;
   final String kategori;
+  final String? tanggalKadaluwarsa; // <-- PERUBAHAN NAMA
 
-  Product(
-      {required this.nama,
-      required this.stok,
-      required this.harga,
-      required this.kategori});
+  Product({
+    required this.nama,
+    required this.stok,
+    required this.hargaJual,
+    required this.hargaBeli,
+    required this.kategori,
+    this.tanggalKadaluwarsa, // <-- PERUBAHAN NAMA
+  });
 
-  /// Creates a Product from the JSON provided by your Google Apps Script.
-  /// It expects keys that match your *exact* column headers.
+  /// Membuat Produk dari JSON yang diberikan oleh Google Apps Script Anda.
   factory Product.fromJson(Map<String, dynamic> json) {
-    // We use `int.tryParse()` to safely convert the values.
-    // .toString() handles numbers (e.g., 100) and strings (e.g., "100").
-    // If the value is null or "abc", it will safely become 0.
     return Product(
       nama: json['nama'] ?? 'Nama Tidak Diketahui',
       stok: int.tryParse(json['stok'].toString()) ?? 0,
-      harga: int.tryParse(json['harga'].toString()) ?? 0,
-      kategori: json['kategori'] ?? 'kategori Tidak ditemukan',
+      hargaJual: int.tryParse(json['harga_jual'].toString()) ?? 0,
+      hargaBeli: int.tryParse(json['harga_beli'].toString()) ?? 0,
+      kategori: json['kategori'] ?? 'Lainnya',
+      tanggalKadaluwarsa: json['tanggal_kadaluwarsa'], // <-- PERUBAHAN NAMA
     );
   }
 }
 
-/// A wrapper class that holds a Product and the quantity in the cart.
+/// Class wrapper yang menyimpan Produk dan kuantitas di keranjang.
 class CartItem {
   final Product product;
   int quantity;
 
   CartItem({required this.product, this.quantity = 1});
 
-  /// Calculates the subtotal for this item.
-  int get subtotal => product.harga * quantity;
+  /// Kalkulasi subtotal berdasarkan harga jual.
+  int get subtotal => product.hargaJual * quantity;
 
-  // --- MODIFIED: ADDED THIS METHOD ---
-  /// Converts the cart item to a JSON-serializable map.
+  /// <-- BARU: Kalkulasi total modal untuk item ini.
+  int get totalModal => product.hargaBeli * quantity;
+
+  /// <-- BARU: Kalkulasi total margin untuk item ini.
+  int get subtotalMargin => subtotal - totalModal;
+
+  /// Mengonversi item keranjang ke map yang siap JSON.
   Map<String, dynamic> toJson() {
     return {
       'nama': product.nama,
-      'qty': quantity,
-      'price_per_item': product.harga,
+      'kuantitas': quantity, // <-- PERUBAHAN NAMA
+      'harga_jual': product.hargaJual, // <-- PERUBAHAN NAMA
+      'harga_beli': product.hargaBeli,
     };
   }
 }
 
 // --- SERVICE CLASS (State Management) ---
 
-/// This class manages the app's state (the shopping cart).
-/// Other widgets can "listen" to this class for changes.
 class CartService extends ChangeNotifier {
   final Map<String, CartItem> _items = {};
 
-  // Public getter for the items (as a list)
   List<CartItem> get items => _items.values.toList();
 
-  /// Adds a product to the cart or increments its quantity.
   void addItem(Product product) {
     if (_items.containsKey(product.nama)) {
-      // If item already exists, increment quantity
       _items[product.nama]!.quantity++;
     } else {
-      // Otherwise, add new item to cart
       _items[product.nama] = CartItem(product: product);
     }
-    // Tell all listening widgets to rebuild
     notifyListeners();
   }
 
   void removeItem(Product product) {
     if (_items.containsKey(product.nama)) {
-      // If item exists, decrement quantity
       _items[product.nama]!.quantity--;
-
-      // If quantity drops to 0, remove the item from the map
       if (_items[product.nama]!.quantity <= 0) {
         _items.remove(product.nama);
       }
-
-      // Tell all listening widgets to rebuild
       notifyListeners();
     }
   }
 
-  /// --- NEW METHOD ---
-  /// Sets the quantity of a product in the cart to a specific amount.
-  /// If the quantity is 0 or less, the item is removed.
   void setItemQuantity(Product product, int quantity) {
     if (quantity <= 0) {
-      // If quantity is 0 or less, remove it
       if (_items.containsKey(product.nama)) {
         _items.remove(product.nama);
       }
     } else {
-      // Otherwise, set it
       if (_items.containsKey(product.nama)) {
-        // If item exists, update its quantity
         _items[product.nama]!.quantity = quantity;
       } else {
-        // If it doesn't exist (e.g., user types in 5), add it
         _items[product.nama] = CartItem(product: product, quantity: quantity);
       }
     }
     notifyListeners();
   }
 
-  /// --- NEW METHOD ---
-  /// Gets the current quantity of a specific product in the cart.
   int getProductQuantity(Product product) {
-    if (_items.containsKey(product.nama)) {
-      return _items[product.nama]!.quantity;
-    }
-    return 0; // Not in cart
+    return _items[product.nama]?.quantity ?? 0;
   }
 
-  /// Clears all items from the cart.
   void clearCart() {
     _items.clear();
     notifyListeners();
   }
 
-  /// Calculates the total harga of all items in the cart.
+  /// Kalkulasi total harga jual (omset) dari keranjang.
   int get totalPrice {
-    // Use fold to sum up the prices of all items.
     return _items.values.fold(0, (total, item) => total + item.subtotal);
   }
 
-  // --- API CALL ---
+  /// <-- BARU: Kalkulasi total margin (profit) dari keranjang.
+  int get totalMargin {
+    return _items.values.fold(0, (total, item) => total + item.subtotalMargin);
+  }
 
-  /// Submits the order to your Google Apps Script using GET.
-  Future<bool> placeOrder(
-      {required String userName,
-      required int paymentAmount,
-      required int change,
-      required String paymentMethod}) async {
-    // Check if the URL is still the placeholder.
+  /// Mengirim pesanan ke Google Apps Script.
+  Future<bool> placeOrder({
+    required String userName,
+    required int paymentAmount,
+    required int change,
+    required String paymentMethod,
+  }) async {
     if (kApiUrl.contains("YOUR_DEPLOYMENT_ID")) {
-      print("---------------------------------------------------------");
-      print("---         !!! ACTION REQUIRED !!!                   ---");
-      print("---   'Order Gagal' because your API URL is not set.  ---");
-      print("---   Please replace 'YOUR_DEPLOYMENT_ID' in        ---");
-      print("---   flutter_cart_service.dart with your real URL.   ---");
-      print("---------------------------------------------------------");
-      return false; // Fail fast so you can see this error
+      print("--- ERROR: API URL belum diatur ---");
+      return false;
     }
 
     if (items.isEmpty) return false;
 
-    // --- MODIFIED: Use the new toJson() method ---
+    // Gunakan method toJson() yang sudah diperbarui
     final orderItems = items.map((item) => item.toJson()).toList();
 
-    // --- THIS IS THE NEW FIX ---
-    // We send all data as URL-encoded parameters in a GET request.
-
-    // 1. Create the query parameters
-    // --- MODIFIED: Added .toString() to int values ---
     final queryParams = {
       'action': 'placeOrder',
       'secret': kSecretKey,
       'userName': userName,
-      'paymentAmount': paymentAmount.toString(), // <-- FIX
-      'change': change.toString(), // <-- FIX
+      'paymentAmount': paymentAmount.toString(),
+      'change': change.toString(),
       'paymentMethod': paymentMethod,
-      'total': totalPrice.toString(),
-      'items': jsonEncode(orderItems), // Send the list as a JSON string
+      'total': totalPrice.toString(), // Ini adalah 'Total Belanja'
+      'items': jsonEncode(orderItems), // Mengirim JSON (nama, kuantitas, harga_jual, harga_beli)
     };
 
-    // 2. Create the full URL with encoded parameters
-    // We need to build the query string manually to ensure correct encoding
     final baseUri = Uri.parse(kApiUrl);
     final urlWithParams = baseUri.replace(queryParameters: queryParams);
 
     try {
-      // 3. Make the GET request
-      // --- MODIFIED: Added a timeout ---
       final response = await http.get(urlWithParams).timeout(
             const Duration(seconds: 30),
           );
 
-      // Now we can trust the 200 OK response and the JSON body
       if (response.statusCode == 200) {
-        // We MUST parse the JSON body to confirm success.
         final data = jsonDecode(response.body);
 
         if (data['success'] == true) {
-          // This is the ONLY success path.
           clearCart();
           return true;
         } else {
-          // The script reported an error (e.g., "Invalid authentication")
-          print(
-              'Apps Script Error: ${data['error'] ?? 'Unknown error from script'}');
-          return false; // <-- This correctly handles the "wrong key" test.
+          print('Apps Script Error: ${data['error'] ?? 'Unknown error'}');
+          return false;
         }
       } else {
-        // The server returned a real error (404, 500, etc.)
         print('HTTP Error: ${response.statusCode}');
         return false;
       }
     } catch (e) {
-      // A network error or JSON parsing error occurred
       print('Network or Parsing Error: $e');
       return false;
     }

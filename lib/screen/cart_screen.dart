@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'dart:convert'; // <-- IMPORT BARU
-import 'package:http/http.dart' as http; // <-- IMPORT BARU
-import 'package:intl/intl.dart'; // <-- IMPORT BARU
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import '/service/flutter_cart_service.dart';
-import '../app_config.dart'; // <-- IMPORT BARU
+import '../app_config.dart';
 
 class CartScreen extends StatefulWidget {
   const CartScreen({Key? key}) : super(key: key);
@@ -17,76 +17,60 @@ class CartScreen extends StatefulWidget {
 class _CartScreenState extends State<CartScreen> {
   bool _isPlacingOrder = false;
   final _nameController = TextEditingController();
-  // Format Rupiah dari dialog pembayaran
- 
+
   @override
   void dispose() {
     _nameController.dispose();
     super.dispose();
   }
 
-  /// Handles the "Place Order" button press
+  /// Menangani tombol "Place Order"
   Future<bool> _onPlaceOrder(CartService cart, int paymentAmount, int change,
       String paymentMethod) async {
     if (cart.items.isEmpty) return false;
+
+    // VALIDASI BARU: Wajib isi nama jika PayLater
+    if (paymentMethod == 'PayLater' && _nameController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Nama Pelanggan wajib diisi untuk PayLater!'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return false; // Hentikan proses
+    }
 
     setState(() {
       _isPlacingOrder = true;
     });
 
-    final userName =
-        _nameController.text.isNotEmpty ? _nameController.text : 'Guest';
+    final userName = _nameController.text.trim().isNotEmpty
+        ? _nameController.text.trim()
+        : 'Guest';
 
-    // --- Logika API baru (dari v7) dimulai di sini ---
     String? errorMessage;
     String successMessage = '';
-    final int totalPrice = cart.totalPrice; // Ambil total dari keranjang
 
     try {
-      // 1. Format data item
-      final List<Map<String, dynamic>> itemsJson = cart.items
-          .map((item) => {
-                'nama': item.product.nama,
-                'qty': item.quantity,
-                'price_per_item': item.product.harga,
-              })
-          .toList();
+      // Panggil service placeOrder, sekarang lebih simpel
+      // Service akan otomatis mengambil items dari dirinya sendiri
+      bool success = await cart.placeOrder(
+        userName: userName,
+        paymentAmount: paymentAmount,
+        change: change,
+        paymentMethod: paymentMethod,
+      );
 
-      // 2. Siapkan parameter
-      final queryParams = {
-        'action': 'placeOrder',
-        'secret': kSecretKey,
-        'userName': userName, // Dari _nameController
-        'paymentMethod': paymentMethod, // Dari dialog
-        'total': totalPrice.toString(),
-        'paymentAmount': paymentAmount.toString(),
-        'change': change.toString(),
-        'items': jsonEncode(itemsJson), // Kirim JSON
-      };
-
-      final baseUri = Uri.parse(kApiUrl);
-      final urlWithParams = baseUri.replace(queryParameters: queryParams);
-
-      // 3. Panggil API
-      final response = await http.get(urlWithParams);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == true) {
-          successMessage = data['message'] ?? 'Pesanan berhasil disimpan!';
-        } else {
-          errorMessage = data['error'] ?? 'Gagal menyimpan pesanan';
-        }
+      if (success) {
+        successMessage = 'Pesanan berhasil disimpan!';
       } else {
-        errorMessage = 'Error Server (Status: ${response.statusCode})';
+        errorMessage = 'Gagal menyimpan pesanan. Cek koneksi atau stok.';
       }
     } catch (e) {
       errorMessage = 'Error koneksi: $e';
     }
 
-    // --- Akhir logika API baru ---
-
-    if (!mounted) return false; // Widget was removed
+    if (!mounted) return false;
 
     if (errorMessage == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -95,11 +79,10 @@ class _CartScreenState extends State<CartScreen> {
           backgroundColor: Colors.green,
         ),
       );
-      cart.clearCart(); // Bersihkan keranjang
-      Navigator.of(context).pop(); // Pop the CartScreen
+      cart.clearCart();
+      Navigator.of(context).pop(); // Tutup CartScreen
       return true;
     } else {
-      // Jika gagal, set state kembali agar pengguna bisa mencoba lagi
       setState(() {
         _isPlacingOrder = false;
       });
@@ -113,7 +96,7 @@ class _CartScreenState extends State<CartScreen> {
     }
   }
 
-  /// Shows a dialog to set the quantity for an item
+  /// Menampilkan dialog untuk set kuantitas
   Future<void> _showQuantityDialog(
       BuildContext context, CartService cart, Product product) async {
     final quantityController = TextEditingController(
@@ -154,7 +137,7 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  /// Shows a confirmation dialog before deleting an item
+  /// Menampilkan dialog konfirmasi hapus
   Future<void> _showDeleteConfirmationDialog(
       BuildContext context, CartService cart, Product product) async {
     return showDialog<void>(
@@ -184,16 +167,18 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  /// Shows the payment dialog
+  /// Menampilkan dialog pembayaran
   Future<void> _showPaymentDialog(
       BuildContext context, CartService cart) async {
     return showDialog<void>(
       context: context,
+      barrierDismissible: !_isPlacingOrder, // Cegah tutup saat loading
       builder: (BuildContext dialogContext) {
         return _PaymentDialogContent(
           cart: cart,
+          // <-- BARU: Kirim nama pelanggan ke dialog
+          customerName: _nameController.text.trim(),
           onPlaceOrder: (int paymentAmount, int change, String paymentMethod) {
-            // Teruskan panggilan ke fungsi _onPlaceOrder yang sudah diperbarui
             return _onPlaceOrder(cart, paymentAmount, change, paymentMethod);
           },
         );
@@ -205,7 +190,6 @@ class _CartScreenState extends State<CartScreen> {
   Widget build(BuildContext context) {
     final cart = context.watch<CartService>();
 
-    // Gunakan NumberFormat lokal untuk harga di UI
     String formatHargaLokal(int harga) {
       return 'Rp ${harga.toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (match) => '.')}';
     }
@@ -255,8 +239,9 @@ class _CartScreenState extends State<CartScreen> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.start,
                                 children: [
+                                  // PERUBAHAN: Tampilkan harga jual
                                   Text(
-                                      '${formatHargaLokal(item.product.harga)} / item'),
+                                      '${formatHargaLokal(item.product.hargaJual)} / item'),
                                 ],
                               ),
                               const SizedBox(height: 8),
@@ -336,8 +321,8 @@ class _CartScreenState extends State<CartScreen> {
                 TextField(
                   controller: _nameController,
                   decoration: InputDecoration(
-                    labelText: 'Nama Pelanggan (Opsional)',
-                    hintText: 'Guest',
+                    labelText: 'Nama Pelanggan', // <-- Label diubah
+                    hintText: 'Wajib diisi jika PayLater',
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12)),
                     filled: true,
@@ -345,14 +330,24 @@ class _CartScreenState extends State<CartScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
+                // <-- BARU: Tampilkan Total Margin -->
                 Text(
-                  'Total: ${formatHargaLokal(cart.totalPrice)}',
+                  'Total Omset: ${formatHargaLokal(cart.totalPrice)}',
                   style: Theme.of(context)
                       .textTheme
                       .headlineSmall
                       ?.copyWith(fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
+                Text(
+                  'Total Margin: ${formatHargaLokal(cart.totalMargin)}',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(color: Colors.green.shade800),
+                  textAlign: TextAlign.center,
+                ),
+                // <-- Akhir penambahan margin -->
                 const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: (cart.items.isEmpty || _isPlacingOrder)
@@ -384,9 +379,9 @@ class _CartScreenState extends State<CartScreen> {
 }
 
 // Widget ini mengelola state internal dialog pembayaran
-
 class _PaymentDialogContent extends StatefulWidget {
   final CartService cart;
+  final String customerName; // <-- BARU
   final Future<bool> Function(
     int paymentAmount,
     int change,
@@ -396,6 +391,7 @@ class _PaymentDialogContent extends StatefulWidget {
   const _PaymentDialogContent({
     Key? key,
     required this.cart,
+    required this.customerName,
     required this.onPlaceOrder,
   }) : super(key: key);
 
@@ -404,7 +400,6 @@ class _PaymentDialogContent extends StatefulWidget {
 }
 
 class _PaymentDialogContentState extends State<_PaymentDialogContent> {
-  // Semua state dialog dikelola di sini
   late final TextEditingController _paymentAmountController;
   String _paymentMethod = 'Cash';
   int _change = 0;
@@ -430,28 +425,32 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
   }
 
   void _updateState() {
-    if (_paymentMethod == 'Cash') {
-      _paymentAmount =
-          int.tryParse(_paymentAmountController.text.replaceAll('.', '')) ?? 0;
-      if (_paymentAmount >= widget.cart.totalPrice) {
-        _change = _paymentAmount - widget.cart.totalPrice;
-        _canPlaceOrder = true;
-      } else {
+    setState(() {
+      if (_paymentMethod == 'Cash') {
+        _paymentAmount =
+            int.tryParse(_paymentAmountController.text.replaceAll('.', '')) ??
+                0;
+        if (_paymentAmount >= widget.cart.totalPrice) {
+          _change = _paymentAmount - widget.cart.totalPrice;
+          _canPlaceOrder = true;
+        } else {
+          _change = 0;
+          _canPlaceOrder = false;
+        }
+      } else if (_paymentMethod == 'QRIS') {
+        _paymentAmount = widget.cart.totalPrice;
         _change = 0;
-        _canPlaceOrder = false;
+        _canPlaceOrder = true;
+      } else if (_paymentMethod == 'PayLater') {
+        _paymentAmount = widget.cart.totalPrice; // Total utang
+        _change = 0;
+        // VALIDASI BARU: Bisa PayLater HANYA jika nama pelanggan diisi
+        _canPlaceOrder = widget.customerName.trim().isNotEmpty;
       }
-    } else if (_paymentMethod == 'QRIS') {
-      _paymentAmount = widget.cart.totalPrice;
-      _change = 0;
-      _canPlaceOrder = true;
-    }
-    // Rebuild dialog
-    setState(() {});
+    });
   }
 
-  // --- Helper functions dipindahkan ke sini ---
   String _formatPrice(int harga) {
-    // Format untuk keypad, tanpa "Rp"
     return harga
         .toString()
         .replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (match) => '.');
@@ -510,7 +509,6 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
 
   @override
   Widget build(BuildContext context) {
-    // Build method untuk konten dialog
     return AlertDialog(
       title: const Text('Pembayaran'),
       content: SingleChildScrollView(
@@ -520,17 +518,19 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
             DropdownButton<String>(
               value: _paymentMethod,
               isExpanded: true,
-              items: ['Cash', 'QRIS']
+              items: ['Cash', 'QRIS', 'PayLater'] // <-- BARU: Tambah PayLater
                   .map((method) => DropdownMenuItem(
                         value: method,
                         child: Text(method),
                       ))
                   .toList(),
               onChanged: (value) {
-                setState(() {
-                  _paymentMethod = value!;
-                  _updateState(); // Panggil update manual
-                });
+                if (value != null) {
+                  setState(() {
+                    _paymentMethod = value;
+                    _updateState();
+                  });
+                }
               },
             ),
             const SizedBox(height: 16),
@@ -593,6 +593,23 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
                 'Silakan scan QRIS untuk membayar ${_rupiahFormat.format(widget.cart.totalPrice)}',
                 textAlign: TextAlign.center,
               ),
+            // <-- BARU: Tampilan untuk PayLater -->
+            if (_paymentMethod == 'PayLater')
+              Column(
+                children: [
+                  Text(
+                    '${widget.cart.totalPrice > 0 ? _rupiahFormat.format(widget.cart.totalPrice) : "Rp 0"} akan ditambahkan ke tagihan Sdr/i ${widget.customerName.isNotEmpty ? widget.customerName : '...'}',
+                    textAlign: TextAlign.center,
+                  ),
+                  if (widget.customerName.trim().isEmpty)
+                    const Text(
+                      'Nama Pelanggan di layar keranjang wajib diisi!',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          color: Colors.red, fontWeight: FontWeight.bold),
+                    ),
+                ],
+              ),
           ],
         ),
       ),
@@ -612,18 +629,23 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
                     _isDialogLoading = true;
                   });
 
-                  // Panggil fungsi dari parent
-                  final success = await widget.onPlaceOrder(
-                      _paymentAmount, _change, _paymentMethod);
+                  // Tentukan paymentAmount dan change untuk PayLater
+                  int finalPaymentAmount =
+                      _paymentMethod == 'PayLater' ? 0 : _paymentAmount;
+                  int finalChange = _paymentMethod == 'PayLater' ? 0 : _change;
 
-                  if (!success) {
+                  final success = await widget.onPlaceOrder(
+                      finalPaymentAmount, finalChange, _paymentMethod);
+
+                  if (!mounted) return;
+
+                  if (success) {
+                    Navigator.of(context).pop();
+                  } else {
+                    // Jika gagal (cth: nama kosong), dialog tetap terbuka
                     setState(() {
                       _isDialogLoading = false;
                     });
-                  }
-
-                  if (success) {
-                    if (mounted) Navigator.of(context).pop();
                   }
                 }
               : null,

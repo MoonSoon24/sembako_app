@@ -1,15 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
-
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart'; // <-- BARU
 import '/service/flutter_cart_service.dart';
 import 'cart_screen.dart';
 import 'add_product_screen.dart';
 import '../app_config.dart';
-import 'manage_stock_screen.dart';
-
+import 'manage_product_screen.dart';
 
 class ProductListScreen extends StatefulWidget {
   const ProductListScreen({Key? key}) : super(key: key);
@@ -21,14 +19,12 @@ class ProductListScreen extends StatefulWidget {
 class ProductListScreenState extends State<ProductListScreen> {
   late Future<List<Product>> _productsFuture;
 
-  // --- STATE VARIABLES ---
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = "";
   Product? _selectedProduct;
   final TextEditingController _quantityController =
       TextEditingController(text: '1');
 
-  // --- NEW STATE FOR FAB ---
   final GlobalKey _panelKey = GlobalKey();
   double _panelHeight = 0.0;
 
@@ -45,14 +41,12 @@ class ProductListScreenState extends State<ProductListScreen> {
     super.dispose();
   }
 
-  /// Memuat ulang data produk dari server.
   void refreshProducts() {
     setState(() {
       _productsFuture = fetchProducts();
     });
   }
 
-  /// Fetches the list of products from your Google Apps Script API
   Future<List<Product>> fetchProducts() async {
     try {
       final queryParams = {
@@ -74,14 +68,8 @@ class ProductListScreenState extends State<ProductListScreen> {
 
         final List<dynamic> productListJson = data['products'];
 
-        final sanitizedList = productListJson.map((json) {
-          if (json['nama'] != null) {
-            json['nama'] = json['nama'].toString();
-          }
-          return json;
-        }).toList();
-
-        return sanitizedList.map((json) => Product.fromJson(json)).toList();
+        // PERUBAHAN: Sanitasi tidak lagi diperlukan, tapi kita parse
+        return productListJson.map((json) => Product.fromJson(json)).toList();
       } else {
         throw Exception(
             'Gagal memuat barang (Status code: ${response.statusCode})');
@@ -92,12 +80,10 @@ class ProductListScreenState extends State<ProductListScreen> {
     }
   }
 
-  /// Checks the cart for the quantity of a specific product.
   int _getCartQuantity(CartService cart, Product product) {
     return cart.getProductQuantity(product);
   }
 
-  /// (Feature 3) Builds the search bar
   Widget _buildSearchBar() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 0),
@@ -135,13 +121,11 @@ class ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
-  /// (Feature 2) Builds the bottom panel for quantity control
   Widget _buildBottomPanel() {
     if (_selectedProduct == null) {
       return const SizedBox.shrink();
     }
 
-    // --- Measure the panel height after it's built ---
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final context = _panelKey.currentContext;
       if (context != null) {
@@ -180,7 +164,6 @@ class ProductListScreenState extends State<ProductListScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Row 1: Title and Close Button
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -206,7 +189,6 @@ class ProductListScreenState extends State<ProductListScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            // Row 2: Quantity Controls
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -240,11 +222,11 @@ class ProductListScreenState extends State<ProductListScreen> {
                       cart.setItemQuantity(_selectedProduct!, newQty);
                       int finalQty = cart.getProductQuantity(_selectedProduct!);
                       setState(() {
-                        finalQty = 1;
-                        _quantityController.text = '$finalQty';
                         if (finalQty == 0) {
                           _selectedProduct = null;
                           _panelHeight = 0.0;
+                        } else {
+                          _quantityController.text = '$finalQty';
                         }
                       });
                     },
@@ -265,7 +247,6 @@ class ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
-  /// Builds the Floating Action Button for the cart
   Widget _buildCartFab() {
     return Consumer<CartService>(
       builder: (context, cart, child) {
@@ -290,12 +271,10 @@ class ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
-  /// Menampilkan modal untuk memilih aksi admin
   void _showAdminMenu(BuildContext context) {
     showDialog(
       context: context,
       builder: (BuildContext ctx) {
-        // Gunakan AlertDialog untuk tampilan di tengah
         return AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16.0),
@@ -305,10 +284,9 @@ class ProductListScreenState extends State<ProductListScreen> {
             textAlign: TextAlign.center,
           ),
           content: Column(
-            mainAxisSize: MainAxisSize.min, // Agar tinggi modal pas
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // Tombol 1: Tambah Barang Baru
               ElevatedButton.icon(
                 icon: const Icon(Icons.add_circle_outline),
                 label: const Text('Tambah Barang Baru'),
@@ -317,7 +295,7 @@ class ProductListScreenState extends State<ProductListScreen> {
                   textStyle: const TextStyle(fontSize: 16),
                 ),
                 onPressed: () async {
-                  Navigator.pop(ctx); // Tutup dialog
+                  Navigator.pop(ctx);
                   final result = await Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -325,13 +303,11 @@ class ProductListScreenState extends State<ProductListScreen> {
                     ),
                   );
                   if (result == true) {
-                    refreshProducts(); // Panggil fungsi refresh
+                    refreshProducts();
                   }
                 },
               ),
-              const SizedBox(height: 12), // Jarak antar tombol
-
-              // Tombol 2: Tambah Stok / Update Harga
+              const SizedBox(height: 12),
               ElevatedButton.icon(
                 icon: const Icon(Icons.inventory_2_outlined),
                 label: const Text('Manajemen Stok'),
@@ -342,14 +318,13 @@ class ProductListScreenState extends State<ProductListScreen> {
                   textStyle: const TextStyle(fontSize: 16),
                 ),
                 onPressed: () {
-                  Navigator.pop(ctx); // Tutup dialog
+                  Navigator.pop(ctx);
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const ManageStockScreen(),
+                      builder: (context) => const ManageProductScreen(),
                     ),
                   ).then((_) {
-                    // Refresh data setelah kembali dari layar manajemen
                     refreshProducts();
                   });
                 },
@@ -357,7 +332,6 @@ class ProductListScreenState extends State<ProductListScreen> {
             ],
           ),
           actions: [
-            // Tombol Tutup
             TextButton(
               child: const Text('Tutup'),
               onPressed: () {
@@ -370,7 +344,6 @@ class ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
-  /// Membangun FAB Admin (+)
   Widget _buildAdminFab() {
     return FloatingActionButton(
       onPressed: () => _showAdminMenu(context),
@@ -379,12 +352,28 @@ class ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
+  // --- BARU: Fungsi helper untuk cek kadaluwarsa
+  int? _getDaysUntilExpiry(String? expiryDateString) {
+    if (expiryDateString == null || expiryDateString.isEmpty) {
+      return null;
+    }
+    try {
+      final expiryDate = DateTime.parse(expiryDateString);
+      final today = DateTime.now();
+      // Hitung perbedaan hari, abaikan jam
+      final difference = expiryDate
+          .difference(DateTime(today.year, today.month, today.day))
+          .inDays;
+      return difference;
+    } catch (e) {
+      return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Layar ini TIDAK memiliki Scaffold sendiri
     return Stack(
       children: [
-        // 1. The main content (your old column)
         Column(
           children: [
             _buildSearchBar(),
@@ -392,7 +381,6 @@ class ProductListScreenState extends State<ProductListScreen> {
               child: FutureBuilder<List<Product>>(
                 future: _productsFuture,
                 builder: (context, snapshot) {
-                  // ... (Loading, Error, Empty states are unchanged)
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
                   }
@@ -409,7 +397,6 @@ class ProductListScreenState extends State<ProductListScreen> {
                         child: Text('Tidak ada barang yang ditemukan.'));
                   }
 
-                  // ... (Filtering logic is unchanged)
                   final allProducts = snapshot.data!;
                   final filteredProducts = allProducts.where((product) {
                     final nameLower = product.nama.toLowerCase();
@@ -424,7 +411,6 @@ class ProductListScreenState extends State<ProductListScreen> {
 
                   return Consumer<CartService>(
                     builder: (context, cart, child) {
-                      // --- NEW SORTING LOGIC ---
                       filteredProducts.sort((a, b) {
                         final bool isAInCart = cart.getProductQuantity(a) > 0;
                         final bool isBInCart = cart.getProductQuantity(b) > 0;
@@ -439,26 +425,56 @@ class ProductListScreenState extends State<ProductListScreen> {
                               .compareTo(b.nama.toLowerCase());
                         }
                       });
-                      // --- END NEW SORTING LOGIC ---
 
                       return ListView.builder(
-                        padding: const EdgeInsets.all(8.0),
+                        // Tambahkan padding di bawah untuk panel
+                        padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 80.0),
                         itemCount: filteredProducts.length,
                         itemBuilder: (context, index) {
                           final product = filteredProducts[index];
                           final bool isHighlighted =
                               cart.getProductQuantity(product) > 0;
 
+                          // --- BARU: Logika Peringatan ---
+                          final bool lowStock = product.stok <= 5;
+                          final int? daysUntilExpiry = _getDaysUntilExpiry(
+                              product.tanggalKadaluwarsa); // <-- PERUBAHAN
+                          final bool expiringSoon =
+                              (daysUntilExpiry != null && daysUntilExpiry <= 7);
+                          // --- Akhir Logika Peringatan ---
+
                           return Card(
                             color: isHighlighted ? Colors.blue.shade100 : null,
                             elevation: isHighlighted ? 4.0 : 1.0,
                             margin: const EdgeInsets.symmetric(vertical: 4.0),
                             child: ListTile(
+                              leading: expiringSoon
+                                  ? Icon(Icons.warning_amber_rounded,
+                                      color: Colors.red.shade700)
+                                  : (lowStock
+                                      ? Icon(Icons.inventory_2_outlined,
+                                          color: Colors.orange.shade700)
+                                      : null),
                               title: Text(product.nama,
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold)),
                               subtitle: Text(
-                                  'Stok: ${product.stok} | Rp ${product.harga}'),
+                                  'Stok: ${product.stok} | Rp ${product.hargaJual}'),
+                              trailing: (daysUntilExpiry != null &&
+                                      daysUntilExpiry <= 30)
+                                  ? Chip(
+                                      label: Text('$daysUntilExpiry hari lagi'),
+                                      backgroundColor: expiringSoon
+                                          ? Colors.red.shade100
+                                          : Colors.amber.shade100,
+                                      labelStyle: TextStyle(
+                                          color: expiringSoon
+                                              ? Colors.red.shade900
+                                              : Colors.amber.shade900,
+                                          fontSize: 12),
+                                      padding: EdgeInsets.zero,
+                                    )
+                                  : null,
                               onTap: () {
                                 final cart = context.read<CartService>();
                                 int currentQty =
@@ -469,9 +485,8 @@ class ProductListScreenState extends State<ProductListScreen> {
                                 }
                                 setState(() {
                                   _selectedProduct = product;
-                                  currentQty = 1;
-                                  _quantityController.text = '$currentQty';
-                                  // Panel height will be calculated automatically
+                                  // Selalu set ke 1 saat memilih, bukan kuantitas keranjang
+                                  _quantityController.text = '1';
                                 });
 
                                 ScaffoldMessenger.of(context)
@@ -492,12 +507,9 @@ class ProductListScreenState extends State<ProductListScreen> {
                 },
               ),
             ),
-            // (Feature 2) The bottom panel
             _buildBottomPanel(),
           ],
         ),
-
-        // 2. Tombol FAB Keranjang (Kanan Bawah)
         AnimatedPositioned(
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeInOut,
@@ -505,8 +517,6 @@ class ProductListScreenState extends State<ProductListScreen> {
           bottom: _panelHeight + 16.0,
           child: _buildCartFab(),
         ),
-
-        // 3. Tombol FAB Admin (Kiri Bawah)
         AnimatedPositioned(
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeInOut,

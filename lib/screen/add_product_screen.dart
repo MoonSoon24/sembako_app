@@ -1,8 +1,8 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart'; // <-- BARU: Untuk format tanggal
 import '../app_config.dart';
 
 class AddProductScreen extends StatefulWidget {
@@ -13,17 +13,19 @@ class AddProductScreen extends StatefulWidget {
 }
 
 class _AddProductScreenState extends State<AddProductScreen> {
-  // Kunci form dan state
   final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
 
   // Controller untuk field
   final _nameController = TextEditingController();
   final _stockController = TextEditingController();
-  final _priceController = TextEditingController();
-  String? _selectedCategory;
+  final _hargaJualController = TextEditingController(); // <-- PERUBAHAN NAMA
+  final _hargaBeliController = TextEditingController(); // <-- BARU
+  final _tanggalExpireController = TextEditingController(); // <-- BARU
 
-  // Daftar kategori
+  String? _selectedCategory;
+  DateTime? _selectedDate; // <-- BARU
+
   final List<String> _categories = [
     'Sembako',
     'Minuman',
@@ -38,11 +40,12 @@ class _AddProductScreenState extends State<AddProductScreen> {
   void dispose() {
     _nameController.dispose();
     _stockController.dispose();
-    _priceController.dispose();
+    _hargaJualController.dispose();
+    _hargaBeliController.dispose();
+    _tanggalExpireController.dispose();
     super.dispose();
   }
 
-  /// Validator sederhana
   String? _validateNotEmpty(String? value) {
     if (value == null || value.isEmpty) {
       return 'Field ini tidak boleh kosong';
@@ -50,11 +53,25 @@ class _AddProductScreenState extends State<AddProductScreen> {
     return null;
   }
 
-  /// Mengirim produk baru ke Google Apps Script
+  /// <-- BARU: Fungsi untuk menampilkan pemilih tanggal
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2101),
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+        _tanggalExpireController.text = DateFormat('yyyy-MM-dd').format(picked);
+      });
+    }
+  }
+
   Future<void> _submitProduct() async {
-    // Validasi form
     if (!_formKey.currentState!.validate()) {
-      return; // Jika tidak valid, hentikan
+      return;
     }
 
     setState(() {
@@ -68,8 +85,10 @@ class _AddProductScreenState extends State<AddProductScreen> {
         'secret': kSecretKey,
         'nama': _nameController.text,
         'stok': _stockController.text,
-        'harga': _priceController.text,
+        'harga_jual': _hargaJualController.text,
+        'harga_beli': _hargaBeliController.text,
         'kategori': _selectedCategory ?? '',
+        'tanggal_kadaluwarsa': _tanggalExpireController.text, // <-- PERUBAHAN NAMA
       };
 
       final baseUri = Uri.parse(kApiUrl);
@@ -87,10 +106,9 @@ class _AddProductScreenState extends State<AddProductScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          // Refresh daftar produk di layar sebelumnya (jika perlu)
-          // dan kembali
           Navigator.pop(context, true);
         } else {
+          // Tampilkan error dari Apps Script (cth: 'Produk sudah ada')
           throw Exception(data['error'] ?? 'Gagal menambahkan produk');
         }
       } else {
@@ -176,11 +194,27 @@ class _AddProductScreenState extends State<AddProductScreen> {
               ),
               const SizedBox(height: 16),
 
+              // --- Harga Beli (Modal) ---
+              TextFormField(
+                controller: _hargaBeliController,
+                decoration: const InputDecoration(
+                  labelText: 'Harga Beli (Modal)', // <-- BARU
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.attach_money_rounded),
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.digitsOnly
+                ],
+                validator: _validateNotEmpty,
+              ),
+              const SizedBox(height: 16),
+
               // --- Harga Jual ---
               TextFormField(
-                controller: _priceController,
+                controller: _hargaJualController,
                 decoration: const InputDecoration(
-                  labelText: 'Harga Jual',
+                  labelText: 'Harga Jual', // <-- PERUBAHAN
                   border: OutlineInputBorder(),
                   prefixIcon: Icon(Icons.price_change_outlined),
                 ),
@@ -189,6 +223,20 @@ class _AddProductScreenState extends State<AddProductScreen> {
                   FilteringTextInputFormatter.digitsOnly
                 ],
                 validator: _validateNotEmpty,
+              ),
+              const SizedBox(height: 16),
+
+              // --- Tanggal Expire ---
+              TextFormField(
+                controller: _tanggalExpireController,
+                decoration: const InputDecoration(
+                  labelText: 'Tanggal Kadaluwarsa (Opsional)', // <-- PERUBAHAN NAMA
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.calendar_today),
+                ),
+                readOnly: true,
+                onTap: () => _selectDate(context),
+                // Tidak perlu validator karena opsional
               ),
               const SizedBox(height: 32),
 

@@ -3,76 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import '../app_config.dart';
+import '../models/order_models.dart'; // <-- BARU: Impor model
 
 // --- DATA MODEL BARU ---
-
-/// Mewakili satu item dalam 'order_items'
-class OrderItemDetail {
-  final String orderID;
-  final String nama;
-  final int qty;
-  final int pricePerItem;
-
-  OrderItemDetail({
-    required this.orderID,
-    required this.nama,
-    required this.qty,
-    required this.pricePerItem,
-  });
-
-  factory OrderItemDetail.fromJson(Map<String, dynamic> json) {
-    return OrderItemDetail(
-      orderID: json['OrderID'] ?? '',
-      nama: json['nama']?.toString() ?? 'Nama tidak diketahui', // Sesuai 'nama'
-      qty: json['qty'] ?? 0,
-      pricePerItem: json['price_per_item'] ?? 0,
-    );
-  }
-}
-
-/// Mewakili satu baris 'orders' (ringkasan)
-class OrderSummary {
-  final String orderID;
-  final DateTime timestamp;
-  final String userName;
-  final int totalPrice;
-  final int paymentAmount;
-  final String paymentMethod;
-  final int change;
-  final List<OrderItemDetail> items;
-
-  OrderSummary({
-    required this.orderID,
-    required this.timestamp,
-    required this.userName,
-    required this.totalPrice,
-    required this.paymentAmount,
-    required this.paymentMethod,
-    required this.change,
-    this.items = const [],
-  });
-
-  factory OrderSummary.fromJson(Map<String, dynamic> json) {
-    String tsString = json['Timestamp'] ?? '';
-    DateTime parsedTimestamp;
-    try {
-      parsedTimestamp = DateTime.parse(tsString).toLocal();
-    } catch (e) {
-      parsedTimestamp = DateTime.now();
-    }
-
-    return OrderSummary(
-      orderID: json['OrderID'] ?? '', // Ini berisi formula hyperlink
-      timestamp: parsedTimestamp,
-      userName: json['Nama Pembeli'] ?? 'Guest', // Sesuai 'Nama Pembeli'
-      totalPrice: json['Total Harga'] ?? 0, // Sesuai 'Total Harga'
-      paymentAmount: json['Payment Amount'] ?? 0,
-      paymentMethod: json['Payment Method'] ?? 'Cash',
-      change: json['Change'] ?? 0,
-    );
-  }
-}
-
+// ... (SEMUA MODEL DIPINDAHKAN ke order_models.dart) ...
 // --- WIDGET LAYAR RIWAYAT ---
 
 class HistoryScreen extends StatefulWidget {
@@ -118,42 +52,16 @@ class HistoryScreenState extends State<HistoryScreen> {
           throw Exception('API Error: ${data['error']}');
         }
 
-        // 1. Parse kedua array
         final List<dynamic> ordersJson = data['orders'];
         final List<dynamic> itemsJson = data['order_items'];
 
-        List<OrderSummary> summaries =
-            ordersJson.map((json) => OrderSummary.fromJson(json)).toList();
         List<OrderItemDetail> allItems =
             itemsJson.map((json) => OrderItemDetail.fromJson(json)).toList();
 
-        // 2. Gabungkan data di sisi Flutter
-        List<OrderSummary> fullHistory = [];
-        for (var summary in summaries) {
-          var parts = summary.orderID.split('"');
-          String cleanOrderID = '';
-          if (parts.length > 3) {
-            // ID adalah bagian kedua dari belakang (indeks ke-3 dari 5)
-            cleanOrderID = parts[parts.length - 2];
-          } else {
-            // Fallback jika data lama tidak mengandung hyperlink
-            cleanOrderID = summary.orderID;
-          }
-          // Cari semua item yang cocok
-          final matchingItems =
-              allItems.where((item) => item.orderID == cleanOrderID).toList();
-
-          fullHistory.add(OrderSummary(
-            orderID: cleanOrderID,
-            timestamp: summary.timestamp,
-            userName: summary.userName,
-            totalPrice: summary.totalPrice,
-            paymentAmount: summary.paymentAmount,
-            paymentMethod: summary.paymentMethod,
-            change: summary.change,
-            items: matchingItems,
-          ));
-        }
+        // Gabungkan data di sisi Flutter
+        List<OrderSummary> fullHistory = ordersJson
+            .map((json) => OrderSummary.fromJson(json, allItems))
+            .toList();
 
         return fullHistory;
       } else {
@@ -177,6 +85,80 @@ class HistoryScreenState extends State<HistoryScreen> {
           t.month == selectedDate.month &&
           t.day == selectedDate.day;
     }).toList();
+  }
+
+  /// <-- BARU: Widget untuk menampilkan ringkasan Omset dan Margin
+  Widget _buildSummaryCard(List<OrderSummary> filteredHistory) {
+    // Hanya hitung dari transaksi yang LUNAS
+    final lunasHistory = filteredHistory
+        .where((h) => h.status == 'Lunas') // <-- PERUBAHAN: Cek status
+        .toList();
+
+    int totalOmset =
+        lunasHistory.fold(0, (prev, order) => prev + order.totalPrice);
+    int totalMargin =
+        lunasHistory.fold(0, (prev, order) => prev + order.totalMargin);
+    int totalTransaksi = lunasHistory.length;
+
+    String title = "Ringkasan Hari Ini";
+    if (widget.selectedDate != null) {
+      title =
+          "Ringkasan ${DateFormat('d MMM yyyy', 'id_ID').format(widget.selectedDate!)}";
+    }
+
+    return Card(
+      margin: const EdgeInsets.all(8.0),
+      elevation: 4,
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 12),
+            _buildSummaryRow(
+              "Total Omset (Lunas)",
+              _rupiahFormat.format(totalOmset),
+              Colors.black,
+            ),
+            const SizedBox(height: 8),
+            _buildSummaryRow(
+              "Total Margin (Lunas)",
+              _rupiahFormat.format(totalMargin),
+              Colors.green.shade800,
+            ),
+            const SizedBox(height: 8),
+            _buildSummaryRow(
+              "Total Transaksi (Lunas)",
+              totalTransaksi.toString(),
+              Colors.black,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryRow(String label, String value, Color valueColor) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: const TextStyle(fontSize: 16)),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: valueColor,
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -203,107 +185,131 @@ class HistoryScreenState extends State<HistoryScreen> {
         }
 
         final allHistory = snapshot.data!;
-        final filteredHistory = _filterByDate(allHistory, widget.selectedDate);
+        // Filter HANYA berdasarkan tanggal yang dipilih
+        final filteredHistory = _filterByDate(allHistory,
+            widget.selectedDate ?? DateTime.now()); // Default ke hari ini
 
         if (filteredHistory.isEmpty) {
-          return Center(
-            child: Text(widget.selectedDate != null
-                ? 'Tidak ada transaksi pada tanggal ${DateFormat('d MMM yyyy', 'id_ID').format(widget.selectedDate!)}.'
-                : 'Tidak ada riwayat.'),
+          return Column(
+            children: [
+              _buildSummaryCard(filteredHistory), // Tampilkan card kosong
+              Expanded(
+                child: Center(
+                  child: Text(widget.selectedDate != null
+                      ? 'Tidak ada transaksi pada tanggal ${DateFormat('d MMM yyyy', 'id_ID').format(widget.selectedDate!)}.'
+                      : 'Tidak ada transaksi hari ini.'),
+                ),
+              ),
+            ],
           );
         }
 
         final reversedList = filteredHistory.reversed.toList();
 
-        return ListView.builder(
-          padding: const EdgeInsets.all(8.0),
-          itemCount: reversedList.length,
-          itemBuilder: (context, index) {
-            final history = reversedList[index];
+        return Column(
+          children: [
+            // <-- BARU: Tampilkan Card Ringkasan
+            _buildSummaryCard(filteredHistory),
+            // Daftar Transaksi
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                itemCount: reversedList.length,
+                itemBuilder: (context, index) {
+                  final history = reversedList[index];
 
-            return Card(
-              margin: const EdgeInsets.symmetric(vertical: 6.0),
-              child: ExpansionTile(
-                // Ini adalah UI yang Anda minta:
-                leading: const Icon(Icons.receipt_long),
-                title: Text(
-                  tileDateFormat.format(history.timestamp),
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Text(
-                    '${history.userName} | Total: ${_rupiahFormat.format(history.totalPrice)}'),
-                trailing: Chip(
-                  label: Text(history.orderID,
-                      style: const TextStyle(fontSize: 10)),
-                  backgroundColor: Colors.grey.shade200,
-                ),
-                // Saat ditekan, ini akan membangun daftar item yang dibeli:
-                children: [
-                  // --- Detail Transaksi (di dalam) ---
-                  // Ini akan menampilkan item jika list 'history.items' tidak kosong
-                  ...history.items.map((item) {
-                    return ListTile(
-                      title: Text(item.nama), // Sesuai 'nama'
-                      trailing: Text(
-                          '${item.qty} x ${_rupiahFormat.format(item.pricePerItem)}'),
-                      visualDensity: VisualDensity.compact,
-                      dense: true,
-                    );
-                  }).toList(),
-                  // Garis pemisah
-                  const Divider(indent: 16, endIndent: 16, height: 1),
-                  // Info Pembayaran
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16.0, vertical: 12.0),
-                    child: Column(
+                  // <-- BARU: Beri tanda untuk PayLater/Belum Lunas
+                  Color tileColor = Colors.white;
+                  IconData leadIcon = Icons.receipt_long;
+                  if (history.status == 'Belum Lunas') {
+                    tileColor = Colors.orange.shade50;
+                    leadIcon = Icons.credit_card_off_rounded;
+                  }
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 6.0),
+                    color: tileColor, // <-- PERUBAHAN
+                    child: ExpansionTile(
+                      leading: Icon(leadIcon), // <-- PERUBAHAN
+                      title: Text(
+                        tileDateFormat.format(history.timestamp),
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(
+                          '${history.userName} | Total: ${_rupiahFormat.format(history.totalPrice)}'),
+                      trailing: Chip(
+                        label: Text(history.orderID,
+                            style: const TextStyle(fontSize: 10)),
+                        backgroundColor: Colors.grey.shade200,
+                      ),
                       children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Metode Bayar:',
-                                style: TextStyle(color: Colors.grey)),
-                            Text(history.paymentMethod,
-                                style: const TextStyle(
-                                    fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Total Belanja:'),
-                            Text(_rupiahFormat.format(history.totalPrice)),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Jumlah Bayar:'),
-                            Text(_rupiahFormat.format(history.paymentAmount)),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Text('Kembalian:'),
-                            Text(
-                              _rupiahFormat.format(history.change),
-                              style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.green.shade800),
-                            ),
-                          ],
+                        ...history.items.map((item) {
+                          return ListTile(
+                            title: Text(item.nama),
+                            trailing: Text(
+                                '${item.qty} x ${_rupiahFormat.format(item.pricePerItem)}'), // Tampilkan harga jual
+                            visualDensity: VisualDensity.compact,
+                            dense: true,
+                          );
+                        }).toList(),
+                        const Divider(indent: 16, endIndent: 16, height: 1),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16.0, vertical: 12.0),
+                          child: Column(
+                            children: [
+                              _buildSummaryRow(
+                                'Metode Bayar:',
+                                history.paymentMethod,
+                                history.status == 'Belum Lunas' // <-- PERUBAHAN
+                                    ? Colors.orange.shade800
+                                    : Colors.black,
+                              ),
+                              const SizedBox(height: 4),
+                              _buildSummaryRow(
+                                'Status:', // <-- BARU
+                                history.status, // <-- BARU
+                                history.status == 'Belum Lunas' // <-- BARU
+                                    ? Colors.orange.shade800
+                                    : Colors.green.shade800,
+                              ),
+                              const SizedBox(height: 4),
+                              _buildSummaryRow(
+                                'Total Belanja:',
+                                _rupiahFormat.format(history.totalPrice),
+                                Colors.black,
+                              ),
+                              // <-- BARU: Tampilkan Total Margin per transaksi
+                              _buildSummaryRow(
+                                'Total Margin:',
+                                _rupiahFormat.format(history.totalMargin),
+                                Colors.green.shade800,
+                              ),
+                              if (history.status != 'Belum Lunas') ...[
+                                // <-- PERUBAHAN
+                                const SizedBox(height: 4),
+                                _buildSummaryRow(
+                                  'Jumlah Bayar:',
+                                  _rupiahFormat.format(history.paymentAmount),
+                                  Colors.black,
+                                ),
+                                const SizedBox(height: 4),
+                                _buildSummaryRow(
+                                  'Kembalian:',
+                                  _rupiahFormat.format(history.change),
+                                  Colors.black,
+                                ),
+                              ]
+                            ],
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                ],
+                  );
+                },
               ),
-            );
-          },
+            ),
+          ],
         );
       },
     );

@@ -3,25 +3,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart'; // <-- DIPERLUKAN UNTUK TANGGAL
 import '../app_config.dart';
 import '/service/flutter_cart_service.dart';
 import '/service/stock_cart_service.dart';
 import 'stock_cart_screen.dart';
 
-class ManageStockScreen extends StatefulWidget {
-  const ManageStockScreen({Key? key}) : super(key: key);
+// --- PERUBAHAN NAMA CLASS ---
+class ManageProductScreen extends StatefulWidget {
+  const ManageProductScreen({Key? key}) : super(key: key);
 
   @override
-  State<ManageStockScreen> createState() => _ManageStockScreenState();
+  State<ManageProductScreen> createState() => _ManageProductScreenState();
 }
 
-class _ManageStockScreenState extends State<ManageStockScreen> {
+class _ManageProductScreenState extends State<ManageProductScreen> {
   late Future<List<Product>> _productsFuture;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = "";
   bool _isLoading = false;
 
-  // State untuk panel bawah (seperti di product_list_screen)
+  // State untuk panel bawah (add stock)
   Product? _selectedProduct;
   final TextEditingController _quantityController =
       TextEditingController(text: '1');
@@ -64,14 +66,8 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
         }
         final List<dynamic> productListJson = data['products'];
 
-        final sanitizedList = productListJson.map((json) {
-          if (json['nama'] != null) {
-            json['nama'] = json['nama'].toString();
-          }
-          return json;
-        }).toList();
-
-        return sanitizedList.map((json) => Product.fromJson(json)).toList();
+        // --- PERBAIKAN: Tidak perlu sanitasi manual lagi ---
+        return productListJson.map((json) => Product.fromJson(json)).toList();
       } else {
         throw Exception('Gagal memuat barang (Status: ${response.statusCode})');
       }
@@ -81,84 +77,163 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
     }
   }
 
-  // --- MODAL UNTUK EDIT DETAIL (TETAP ADA) ---
+  // --- MODAL DIPERBARUI UNTUK EDIT SEMUA DETAIL ---
   void _showEditProductModal(Product product) {
-    final _priceController =
-        TextEditingController(text: product.harga.toString());
+    // Inisialisasi controller dengan data produk
+    final _hargaJualController =
+        TextEditingController(text: product.hargaJual.toString());
+    final _hargaBeliController =
+        TextEditingController(text: product.hargaBeli.toString());
     final _categoryController = TextEditingController(text: product.kategori);
+    final _tanggalExpireController =
+        TextEditingController(text: product.tanggalKadaluwarsa ?? '');
+    DateTime? _selectedDate = product.tanggalKadaluwarsa != null
+        ? DateTime.tryParse(product.tanggalKadaluwarsa!)
+        : null;
+
     final _formKey = GlobalKey<FormState>();
+
+    // Helper untuk date picker di dalam modal
+    Future<void> _selectDate(
+        BuildContext context, Function(void Function()) modalSetState) async {
+      final DateTime? picked = await showDatePicker(
+        context: context,
+        initialDate: _selectedDate ?? DateTime.now(),
+        firstDate: DateTime(2020),
+        lastDate: DateTime(2101),
+      );
+      if (picked != null && picked != _selectedDate) {
+        modalSetState(() {
+          _selectedDate = picked;
+          _tanggalExpireController.text =
+              DateFormat('yyyy-MM-dd').format(picked);
+        });
+      }
+    }
 
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Edit: ${product.nama}'),
-          content: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _priceController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(labelText: 'Harga Baru'),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Harga tidak boleh kosong';
-                    }
-                    return null;
-                  },
+        // Gunakan StatefulBuilder agar modal bisa update statenya sendiri (untuk date picker)
+        return StatefulBuilder(
+          builder: (context, modalSetState) {
+            return AlertDialog(
+              title: Text('Edit: ${product.nama}'),
+              content: Form(
+                key: _formKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                          "Nama barang tidak bisa diubah. Hapus dan buat baru jika perlu.",
+                          style: Theme.of(context).textTheme.bodySmall),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _hargaJualController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        decoration:
+                            const InputDecoration(labelText: 'Harga Jual'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Harga Jual tidak boleh kosong';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _hargaBeliController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        decoration: const InputDecoration(
+                            labelText: 'Harga Beli (Modal)'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Harga Beli tidak boleh kosong';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _categoryController,
+                        decoration:
+                            const InputDecoration(labelText: 'Kategori'),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Kategori tidak boleh kosong';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _tanggalExpireController,
+                        decoration: InputDecoration(
+                          labelText: 'Tanggal Kadaluwarsa (Opsional)',
+                          suffixIcon: IconButton(
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              modalSetState(() {
+                                _selectedDate = null;
+                                _tanggalExpireController.text = '';
+                              });
+                            },
+                          ),
+                        ),
+                        readOnly: true,
+                        onTap: () => _selectDate(context, modalSetState),
+                      ),
+                    ],
+                  ),
                 ),
-                TextFormField(
-                  controller: _categoryController,
-                  decoration: const InputDecoration(labelText: 'Kategori Baru'),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Kategori tidak boleh kosong';
-                    }
-                    return null;
-                  },
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Batal'),
+                ),
+                ElevatedButton(
+                  onPressed: _isLoading
+                      ? null
+                      : () async {
+                          if (_formKey.currentState!.validate()) {
+                            setState(() => _isLoading = true);
+                            Navigator.pop(context); // Tutup dialog
+
+                            // Gunakan action 'updateProduct'
+                            await _runApiAction(
+                              action: 'updateProduct',
+                              params: {
+                                'nama': product.nama, // Kunci pencarian
+                                'harga_jual': _hargaJualController.text,
+                                'harga_beli': _hargaBeliController.text,
+                                'kategori': _categoryController.text,
+                                'tanggal_kadaluwarsa':
+                                    _tanggalExpireController.text,
+                              },
+                              successMessage: 'Produk berhasil diperbarui!',
+                            );
+                            setState(() => _isLoading = false);
+                          }
+                        },
+                  child: const Text('Update'),
                 ),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Batal'),
-            ),
-            ElevatedButton(
-              onPressed: _isLoading
-                  ? null
-                  : () async {
-                      if (_formKey.currentState!.validate()) {
-                        setState(() => _isLoading = true);
-                        Navigator.pop(context); // Tutup dialog
-                        // Gunakan action 'updateProduct'
-                        await _runApiAction(
-                          action: 'updateProduct',
-                          params: {
-                            'nama': product.nama, // Skrip butuh 'nama'
-                            'harga':
-                                _priceController.text, // Skrip butuh 'harga'
-                            'kategori': _categoryController
-                                .text, // Skrip butuh 'kategori'
-                          },
-                          successMessage: 'Produk berhasil diperbarui!',
-                        );
-                        setState(() => _isLoading = false);
-                      }
-                    },
-              child: const Text('Update'),
-            ),
-          ],
+            );
+          },
         );
       },
     );
   }
 
-  /// Helper untuk menjalankan aksi API (HANYA UNTUK EDIT)
+  /// Helper untuk menjalankan aksi API
   Future<void> _runApiAction({
     required String action,
     required Map<String, String> params,
@@ -202,13 +277,12 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
     setState(() => _isLoading = false);
   }
 
-  // --- WIDGET BARU: Panel Bawah untuk Kuantitas Stok ---
+  // --- Widget Panel Bawah untuk Tambah Stok (Tidak Berubah) ---
   Widget _buildBottomPanel(StockCartService stockCart) {
     if (_selectedProduct == null) {
       return const SizedBox.shrink();
     }
 
-    // Mengukur tinggi panel
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final context = _panelKey.currentContext;
       if (context != null) {
@@ -250,7 +324,7 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
               children: [
                 Expanded(
                   child: Text(
-                    _selectedProduct!.nama,
+                    "Tambah Stok: ${_selectedProduct!.nama}", // <-- Judul diubah
                     style: const TextStyle(
                         fontWeight: FontWeight.bold, fontSize: 18),
                     overflow: TextOverflow.ellipsis,
@@ -259,6 +333,8 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
                 IconButton(
                   icon: const Icon(Icons.close),
                   onPressed: () {
+                    // --- PERBAIKAN: Set kuantitas ke 0 di keranjang stok ---
+                    stockCart.setItemQuantity(_selectedProduct!, 0);
                     setState(() {
                       _selectedProduct = null;
                       _panelHeight = 0.0;
@@ -310,7 +386,7 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
     );
   }
 
-  // --- WIDGET BARU: Tombol FAB Keranjang Stok ---
+  // --- Tombol FAB Keranjang Stok (Tidak Berubah) ---
   Widget _buildStockCartFab(StockCartService stockCart) {
     final totalItems =
         stockCart.items.fold<int>(0, (prev, item) => prev + item.quantity);
@@ -324,7 +400,7 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
       },
       label: const Text('Review Stok'),
       icon: Badge(
-        label: Text('${stockCart.items.length}'), // Jumlah item unik
+        label: Text('${stockCart.items.length}'),
         isLabelVisible: totalItems > 0,
         child: const Icon(Icons.inventory_2_outlined),
       ),
@@ -333,12 +409,11 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Gunakan Consumer untuk mendapatkan StockCartService
     return Consumer<StockCartService>(
       builder: (context, stockCart, child) {
         return Scaffold(
           appBar: AppBar(
-            title: const Text('Manajemen Stok'),
+            title: const Text('Manajemen Produk & Stok'), // <-- JUDUL BARU
             actions: [
               IconButton(
                 icon: const Icon(Icons.refresh),
@@ -350,7 +425,6 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
             children: [
               Column(
                 children: [
-                  // Search Bar
                   Padding(
                     padding: const EdgeInsets.all(8.0),
                     child: TextField(
@@ -369,7 +443,6 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
                     ),
                   ),
                   if (_isLoading) const LinearProgressIndicator(),
-                  // Product List
                   Expanded(
                     child: FutureBuilder<List<Product>>(
                       future: _productsFuture,
@@ -393,6 +466,8 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
                         }).toList();
 
                         return ListView.builder(
+                          // Padding di bawah agar FAB tidak menutupi item terakhir
+                          padding: const EdgeInsets.only(bottom: 80.0),
                           itemCount: filteredProducts.length,
                           itemBuilder: (context, index) {
                             final product = filteredProducts[index];
@@ -409,9 +484,11 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
                                 title: Text(product.nama,
                                     style: const TextStyle(
                                         fontWeight: FontWeight.bold)),
+                                // --- PERUBAHAN SUBTITLE ---
                                 subtitle: Text(
-                                    'Stok: ${product.stok} | Harga: ${product.harga}'),
-                                // --- LOGIKA ONTAP BARU ---
+                                    'Stok: ${product.stok} | Jual: ${product.hargaJual} | Beli: ${product.hargaBeli}'),
+
+                                // OnTap: Pilih produk untuk DITAMBAH STOKNYA
                                 onTap: () {
                                   int currentQty =
                                       stockCart.getProductQuantity(product);
@@ -427,15 +504,15 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    // Tombol Edit (Harga/Kategori)
+                                    // Tombol Edit (Harga/Kategori/Dll)
                                     IconButton(
                                       icon: Icon(Icons.edit,
                                           color: Colors.blue.shade700),
                                       onPressed: () =>
                                           _showEditProductModal(product),
-                                      tooltip: 'Edit Harga/Kategori',
+                                      tooltip:
+                                          'Edit Detail Produk', // <-- Teks baru
                                     ),
-                                    // Tampilkan jumlah di keranjang
                                     if (isHighlighted)
                                       Chip(
                                         label: Text('$quantityInCart'),
@@ -452,11 +529,9 @@ class _ManageStockScreenState extends State<ManageStockScreen> {
                       },
                     ),
                   ),
-                  // Panel Bawah
                   _buildBottomPanel(stockCart),
                 ],
               ),
-              // Tombol FAB
               AnimatedPositioned(
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
