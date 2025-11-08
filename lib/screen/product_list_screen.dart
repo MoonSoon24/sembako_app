@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart'; // <-- BARU
+import 'package:intl/intl.dart';
 import '/service/flutter_cart_service.dart';
 import 'cart_screen.dart';
 import 'add_product_screen.dart';
@@ -19,6 +19,12 @@ class ProductListScreen extends StatefulWidget {
 class ProductListScreenState extends State<ProductListScreen> {
   late Future<List<Product>> _productsFuture;
 
+  // <-- BARU: State untuk kategori -->
+  List<String> _allCategories = ["Semua Kategori"];
+  String _selectedCategory = "Semua Kategori";
+  bool _isLoadingCategories = true;
+  // <-- Akhir state baru -->
+
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = "";
   Product? _selectedProduct;
@@ -31,7 +37,8 @@ class ProductListScreenState extends State<ProductListScreen> {
   @override
   void initState() {
     super.initState();
-    _productsFuture = fetchProducts();
+    // <-- PERUBAHAN: Muat produk dan kategori secara bersamaan -->
+    refreshProducts();
   }
 
   @override
@@ -41,9 +48,11 @@ class ProductListScreenState extends State<ProductListScreen> {
     super.dispose();
   }
 
+  // <-- PERUBAHAN: Ganti nama jadi refreshAllData & panggil _loadCategories -->
   void refreshProducts() {
     setState(() {
       _productsFuture = fetchProducts();
+      _loadCategories(); // <-- BARU: Muat ulang kategori juga
     });
   }
 
@@ -67,8 +76,6 @@ class ProductListScreenState extends State<ProductListScreen> {
         }
 
         final List<dynamic> productListJson = data['products'];
-
-        // PERUBAHAN: Sanitasi tidak lagi diperlukan, tapi kita parse
         return productListJson.map((json) => Product.fromJson(json)).toList();
       } else {
         throw Exception(
@@ -79,6 +86,70 @@ class ProductListScreenState extends State<ProductListScreen> {
       throw Exception('Gagal memuat barang: $e');
     }
   }
+
+  // <-- BARU: Fungsi untuk mengambil daftar kategori -->
+  Future<List<String>> fetchCategories() async {
+    try {
+      final queryParams = {
+        'action': 'getCategories', // Asumsi action ini ada di Apps Script
+        'secret': kSecretKey,
+      };
+      final baseUri = Uri.parse(kApiUrl);
+      final urlWithParams = baseUri.replace(queryParameters: queryParams);
+      final response = await http.get(urlWithParams);
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == false || data['error'] != null) {
+          throw Exception('API Error: ${data['error']}');
+        }
+        // Asumsi API mengembalikan {'categories': ['Sembako', 'Minuman', ...]}
+        final List<dynamic> categoryListJson = data['categories'];
+        return categoryListJson.cast<String>().toList();
+      } else {
+        throw Exception(
+            'Gagal memuat kategori (Status: ${response.statusCode})');
+      }
+    } catch (e) {
+      print(e);
+      throw Exception('Gagal memuat kategori: $e');
+    }
+  }
+
+  // <-- BARU: Fungsi untuk memuat dan mengatur state kategori -->
+  Future<void> _loadCategories() async {
+    // Jangan set state jika widget sudah di-dispose
+    if (!mounted) return;
+
+    setState(() {
+      _isLoadingCategories = true;
+    });
+
+    try {
+      final categories = await fetchCategories();
+      if (mounted) {
+        setState(() {
+          _allCategories = ["Semua Kategori"]; // Reset
+          _allCategories.addAll(categories);
+          _isLoadingCategories = false;
+        });
+      }
+    } catch (e) {
+      print("Gagal memuat kategori: $e");
+      if (mounted) {
+        setState(() {
+          _isLoadingCategories = false; // Stop loading meski gagal
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Gagal memuat daftar kategori: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+  // <-- Akhir fungsi baru -->
 
   int _getCartQuantity(CartService cart, Product product) {
     return cart.getProductQuantity(product);
@@ -121,7 +192,51 @@ class ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
+  // <-- BARU: Widget untuk dropdown filter kategori -->
+  Widget _buildCategoryFilter() {
+    if (_isLoadingCategories) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+        child: LinearProgressIndicator(),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 0),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12.0),
+          border: Border.all(color: Colors.grey),
+          color: Colors.white,
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _selectedCategory,
+            isExpanded: true,
+            icon: const Icon(Icons.filter_list_alt),
+            items: _allCategories.map((String category) {
+              return DropdownMenuItem<String>(
+                value: category,
+                child: Text(category),
+              );
+            }).toList(),
+            onChanged: (String? newValue) {
+              if (newValue != null) {
+                setState(() {
+                  _selectedCategory = newValue;
+                });
+              }
+            },
+          ),
+        ),
+      ),
+    );
+  }
+  // <-- Akhir widget baru -->
+
   Widget _buildBottomPanel() {
+    // ... (Fungsi ini tidak berubah, salin dari kode lama) ...
     if (_selectedProduct == null) {
       return const SizedBox.shrink();
     }
@@ -248,6 +363,7 @@ class ProductListScreenState extends State<ProductListScreen> {
   }
 
   Widget _buildCartFab() {
+    // ... (Fungsi ini tidak berubah, salin dari kode lama) ...
     return Consumer<CartService>(
       builder: (context, cart, child) {
         final totalItems =
@@ -272,6 +388,7 @@ class ProductListScreenState extends State<ProductListScreen> {
   }
 
   void _showAdminMenu(BuildContext context) {
+    // ... (Fungsi ini tidak berubah, tapi refreshProducts() kini lebih kuat) ...
     showDialog(
       context: context,
       builder: (BuildContext ctx) {
@@ -303,14 +420,14 @@ class ProductListScreenState extends State<ProductListScreen> {
                     ),
                   );
                   if (result == true) {
-                    refreshProducts();
+                    refreshProducts(); // <-- Ini sekarang refresh produk & kategori
                   }
                 },
               ),
               const SizedBox(height: 12),
               ElevatedButton.icon(
                 icon: const Icon(Icons.inventory_2_outlined),
-                label: const Text('Manajemen Stok'),
+                label: const Text('Manajemen Barang'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blue.shade700,
                   foregroundColor: Colors.white,
@@ -325,7 +442,7 @@ class ProductListScreenState extends State<ProductListScreen> {
                       builder: (context) => const ManageProductScreen(),
                     ),
                   ).then((_) {
-                    refreshProducts();
+                    refreshProducts(); // <-- Ini sekarang refresh produk & kategori
                   });
                 },
               ),
@@ -345,6 +462,7 @@ class ProductListScreenState extends State<ProductListScreen> {
   }
 
   Widget _buildAdminFab() {
+    // ... (Fungsi ini tidak berubah) ...
     return FloatingActionButton(
       onPressed: () => _showAdminMenu(context),
       backgroundColor: Colors.green.shade700,
@@ -352,15 +470,14 @@ class ProductListScreenState extends State<ProductListScreen> {
     );
   }
 
-  // --- BARU: Fungsi helper untuk cek kadaluwarsa
   int? _getDaysUntilExpiry(String? expiryDateString) {
+    // ... (Fungsi ini tidak berubah) ...
     if (expiryDateString == null || expiryDateString.isEmpty) {
       return null;
     }
     try {
       final expiryDate = DateTime.parse(expiryDateString);
       final today = DateTime.now();
-      // Hitung perbedaan hari, abaikan jam
       final difference = expiryDate
           .difference(DateTime(today.year, today.month, today.day))
           .inDays;
@@ -377,6 +494,7 @@ class ProductListScreenState extends State<ProductListScreen> {
         Column(
           children: [
             _buildSearchBar(),
+            _buildCategoryFilter(), // <-- BARU: Tambahkan widget filter di sini
             Expanded(
               child: FutureBuilder<List<Product>>(
                 future: _productsFuture,
@@ -398,11 +516,20 @@ class ProductListScreenState extends State<ProductListScreen> {
                   }
 
                   final allProducts = snapshot.data!;
+
                   final filteredProducts = allProducts.where((product) {
                     final nameLower = product.nama.toLowerCase();
                     final queryLower = _searchQuery.toLowerCase();
-                    return nameLower.contains(queryLower);
+
+                    final bool nameMatch = nameLower.contains(queryLower);
+
+                    final bool categoryMatch =
+                        _selectedCategory == "Semua Kategori" ||
+                            product.kategori == _selectedCategory;
+
+                    return nameMatch && categoryMatch;
                   }).toList();
+
                   if (filteredProducts.isEmpty) {
                     return const Center(
                       child: Text('Tidak ada hasil untuk pencarian ini.'),
@@ -427,7 +554,6 @@ class ProductListScreenState extends State<ProductListScreen> {
                       });
 
                       return ListView.builder(
-                        // Tambahkan padding di bawah untuk panel
                         padding: const EdgeInsets.fromLTRB(8.0, 8.0, 8.0, 80.0),
                         itemCount: filteredProducts.length,
                         itemBuilder: (context, index) {
@@ -435,13 +561,11 @@ class ProductListScreenState extends State<ProductListScreen> {
                           final bool isHighlighted =
                               cart.getProductQuantity(product) > 0;
 
-                          // --- BARU: Logika Peringatan ---
                           final bool lowStock = product.stok <= 5;
-                          final int? daysUntilExpiry = _getDaysUntilExpiry(
-                              product.tanggalKadaluwarsa); // <-- PERUBAHAN
+                          final int? daysUntilExpiry =
+                              _getDaysUntilExpiry(product.tanggalKadaluwarsa);
                           final bool expiringSoon =
                               (daysUntilExpiry != null && daysUntilExpiry <= 7);
-                          // --- Akhir Logika Peringatan ---
 
                           return Card(
                             color: isHighlighted ? Colors.blue.shade100 : null,
@@ -459,7 +583,7 @@ class ProductListScreenState extends State<ProductListScreen> {
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold)),
                               subtitle: Text(
-                                  'Stok: ${product.stok} | Rp ${product.hargaJual}'),
+                                  '${product.kategori} | Stok: ${product.stok} | Rp ${product.hargaJual}'),
                               trailing: (daysUntilExpiry != null &&
                                       daysUntilExpiry <= 30)
                                   ? Chip(
@@ -485,7 +609,6 @@ class ProductListScreenState extends State<ProductListScreen> {
                                 }
                                 setState(() {
                                   _selectedProduct = product;
-                                  // Selalu set ke 1 saat memilih, bukan kuantitas keranjang
                                   _quantityController.text = '1';
                                 });
 

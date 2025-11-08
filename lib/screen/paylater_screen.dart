@@ -163,11 +163,51 @@ class PayLaterScreenState extends State<PayLaterScreen> {
       builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('Konfirmasi Pelunasan'),
+          // --- UBAH BAGIAN CONTENT ---
           content: SingleChildScrollView(
             child: ListBody(
               children: <Widget>[
+                // Pertanyaan konfirmasi
                 Text(
-                    'Anda yakin ingin menandai utang Sdr/i ${order.userName} sebesar ${_rupiahFormat.format(order.totalPrice)} (ID: ${order.orderID}) sebagai LUNAS?'), // <-- PERUBAHAN
+                  'Anda yakin ingin menandai utang Sdr/i ${order.userName} (ID: ${order.orderID}) sebagai LUNAS?',
+                ),
+                const SizedBox(height: 16),
+
+                // Detail item
+                Text(
+                  'DETAIL ITEM:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const Divider(thickness: 1),
+                ...order.items.map((item) {
+                  return ListTile(
+                    title: Text(item.nama),
+                    trailing: Text(
+                        '${item.qty} x ${_rupiahFormat.format(item.pricePerItem)}'),
+                    dense: true,
+                    visualDensity: VisualDensity.compact,
+                    contentPadding: EdgeInsets.zero, // Agar lebih rapat
+                  );
+                }).toList(),
+                const Divider(thickness: 1),
+
+                // Total
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Total Utang:',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
+                      Text(
+                        _rupiahFormat.format(order.totalPrice),
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -270,14 +310,15 @@ class PayLaterScreenState extends State<PayLaterScreen> {
                         children: customerDebt.orders.map((order) {
                           return ListTile(
                             title: Text(
-                                'ID: ${order.orderID} - ${_rupiahFormat.format(order.totalPrice)}'), // <-- PERUBAHAN
+                                'ID: ${order.orderID} - ${_rupiahFormat.format(order.totalPrice)}'),
                             subtitle: Text(
                                 DateFormat('d MMM yyyy, HH:mm', 'id_ID')
                                     .format(order.timestamp)),
-                            trailing: ElevatedButton(
-                              child: const Text('Lunasi'),
-                              onPressed: () => _showConfirmationDialog(order),
-                            ),
+                            // UBAH: Jadikan list-nya yang bisa di-tap
+                            onTap: () => _showConfirmationDialog(order),
+                            // UBAH: Ganti tombol dengan ikon
+                            trailing: Icon(Icons.info_outline,
+                                color: Colors.blue.shade700),
                           );
                         }).toList(),
                       ),

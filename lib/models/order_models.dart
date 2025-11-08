@@ -23,10 +23,9 @@ class OrderItemDetail {
     return OrderItemDetail(
       orderID: json['OrderID'] ?? '',
       nama: json['nama']?.toString() ?? 'Nama tidak diketahui',
-      qty: json['kuantitas'] ?? 0, // <-- PERUBAHAN: dari 'qty' ke 'kuantitas'
-      pricePerItem: json['harga_jual'] ??
-          0, // <-- PERUBAHAN: dari 'price_per_item' ke 'harga_jual'
-      hargaBeli: json['harga_beli'] ?? 0,
+      qty: int.tryParse(json['kuantitas']?.toString() ?? '0') ?? 0,
+      pricePerItem: int.tryParse(json['harga_jual']?.toString() ?? '0') ?? 0,
+      hargaBeli: int.tryParse(json['harga_beli']?.toString() ?? '0') ?? 0,
     );
   }
 

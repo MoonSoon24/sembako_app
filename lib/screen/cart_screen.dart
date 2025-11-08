@@ -330,24 +330,14 @@ class _CartScreenState extends State<CartScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // <-- BARU: Tampilkan Total Margin -->
                 Text(
-                  'Total Omset: ${formatHargaLokal(cart.totalPrice)}',
+                  'Total Belanja: ${formatHargaLokal(cart.totalPrice)}',
                   style: Theme.of(context)
                       .textTheme
                       .headlineSmall
                       ?.copyWith(fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                 ),
-                Text(
-                  'Total Margin: ${formatHargaLokal(cart.totalMargin)}',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(color: Colors.green.shade800),
-                  textAlign: TextAlign.center,
-                ),
-                // <-- Akhir penambahan margin -->
                 const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: (cart.items.isEmpty || _isPlacingOrder)
