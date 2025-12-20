@@ -1,11 +1,9 @@
-import 'dart:convert';
 import 'dart:math';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import '../app_config.dart';
 import '../models/order_models.dart';
+import '../service/history_repository.dart'; // Import Repository
 
 enum LaporanLevel { yearly, monthly, weekly, daily }
 
@@ -17,7 +15,10 @@ class DashboardLaporanScreen extends StatefulWidget {
 }
 
 class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
+  // Use Repository
+  final HistoryRepository _historyRepository = HistoryRepository();
   late Future<List<OrderSummary>> _historyFuture;
+
   final NumberFormat _rupiahFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
@@ -35,7 +36,7 @@ class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
   @override
   void initState() {
     super.initState();
-    _historyFuture = fetchHistory();
+    _historyFuture = _historyRepository.getHistory();
   }
 
   void refreshData() {
@@ -46,46 +47,8 @@ class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
       _selectedMonth = null;
       _selectedWeekStartDate = null;
 
-      _historyFuture = fetchHistory();
+      _historyFuture = _historyRepository.getHistory();
     });
-  }
-
-  Future<List<OrderSummary>> fetchHistory() async {
-    try {
-      final queryParams = {
-        'action': 'getHistory',
-        'secret': kSecretKey,
-      };
-      final baseUri = Uri.parse(kApiUrl);
-      final urlWithParams = baseUri.replace(queryParameters: queryParams);
-      final response = await http.get(urlWithParams);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == false || data['error'] != null) {
-          throw Exception('API Error: ${data['error']}');
-        }
-
-        final List<dynamic> ordersJson = data['orders'];
-        final List<dynamic> itemsJson = data['order_items'];
-
-        List<OrderItemDetail> allItems =
-            itemsJson.map((json) => OrderItemDetail.fromJson(json)).toList();
-
-        List<OrderSummary> fullHistory = ordersJson
-            .map((json) => OrderSummary.fromJson(json, allItems))
-            .toList();
-
-        fullHistory.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-        return fullHistory;
-      } else {
-        throw Exception(
-            'Gagal memuat riwayat (Status code: ${response.statusCode})');
-      }
-    } catch (e) {
-      print(e);
-      throw Exception('Gagal memuat riwayat: $e');
-    }
   }
 
   @override
@@ -111,19 +74,23 @@ class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
 
           final allHistory = _allCachedHistory!;
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildNavigation(),
-                const SizedBox(height: 16),
-                _buildOmsetChart(lunasHistory),
-                const SizedBox(height: 16),
-                _buildCategoryPieChart(lunasHistory),
-                const SizedBox(height: 16),
-                _buildTopProducts(allHistory),
-              ],
+          return RefreshIndicator(
+            onRefresh: () async => refreshData(),
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildNavigation(),
+                  const SizedBox(height: 16),
+                  _buildOmsetChart(lunasHistory),
+                  const SizedBox(height: 16),
+                  _buildCategoryPieChart(lunasHistory),
+                  const SizedBox(height: 16),
+                  _buildTopProducts(allHistory),
+                ],
+              ),
             ),
           );
         },
@@ -160,9 +127,7 @@ class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
               onPressed: _navigateBack,
               tooltip: "Kembali",
             ),
-          if (_currentLevel == LaporanLevel.yearly)
-            const SizedBox(width: 16), // Spacer
-
+          if (_currentLevel == LaporanLevel.yearly) const SizedBox(width: 16),
           Expanded(
             child: Text(
               title,
@@ -290,7 +255,7 @@ class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
 
     return BarChartData(
       barTouchData: _getTouchData(LaporanLevel.monthly),
-      maxY: max(maxOmset * 1.2, 1000000), // Min 1jt
+      maxY: max(maxOmset * 1.2, 1000000),
       gridData: _omsetGridData(maxOmset),
       titlesData: FlTitlesData(
         leftTitles: _omsetLeftTitles(maxOmset),
@@ -348,7 +313,7 @@ class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
 
     return BarChartData(
       barTouchData: _getTouchData(LaporanLevel.weekly),
-      maxY: max(maxOmset * 1.2, 1000000), // Min 1jt
+      maxY: max(maxOmset * 1.2, 1000000),
       gridData: _omsetGridData(maxOmset),
       titlesData: FlTitlesData(
         leftTitles: _omsetLeftTitles(maxOmset),
@@ -426,7 +391,7 @@ class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
 
     for (var order in dataBulanIni) {
       int daysDifference = order.timestamp.difference(startOfWeek1).inDays;
-      int weekNumber = (daysDifference / 7).floor() + 1; // 1-based
+      int weekNumber = (daysDifference / 7).floor() + 1;
 
       if (weekNumber >= 1 && weekNumber <= 5) {
         weeklyOmset[weekNumber] =
@@ -465,7 +430,7 @@ class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
 
     return BarChartData(
       barTouchData: _getTouchData(LaporanLevel.daily),
-      maxY: max(maxOmset * 1.2, 500000), // Min 500k
+      maxY: max(maxOmset * 1.2, 500000),
       gridData: _omsetGridData(maxOmset),
       titlesData: FlTitlesData(
         leftTitles: _omsetLeftTitles(maxOmset),
@@ -527,7 +492,7 @@ class DashboardLaporanScreenState extends State<DashboardLaporanScreen> {
 
     return BarChartData(
       barTouchData: BarTouchData(
-        enabled: true, // <-- Aktifkan lagi
+        enabled: true,
         touchTooltipData: BarTouchTooltipData(
           getTooltipItem: (group, groupIndex, rod, rodIndex) {
             return BarTooltipItem(

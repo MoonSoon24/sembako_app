@@ -3,16 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import '../app_config.dart';
-import '../models/order_models.dart'; // <-- BARU: Impor model
-
-// --- DATA MODEL ---
-
-// Model PayLaterOrder diganti dengan OrderSummary dari order_models.dart
+import '../models/order_models.dart';
+import '../service/history_repository.dart'; // Import History Repo
+import '../service/transaction_sync.dart'; // Import Sync Service
+import '../service/database_helper.dart'; // Import DB Helper for local update
 
 class CustomerDebt {
   final String nama;
   int totalUtang;
-  List<OrderSummary> orders; // <-- PERUBAHAN: Gunakan OrderSummary
+  List<OrderSummary> orders;
 
   CustomerDebt({
     required this.nama,
@@ -20,8 +19,6 @@ class CustomerDebt {
     required this.orders,
   });
 }
-
-// --- WIDGET LAYAR ---
 
 class PayLaterScreen extends StatefulWidget {
   const PayLaterScreen({Key? key}) : super(key: key);
@@ -31,7 +28,10 @@ class PayLaterScreen extends StatefulWidget {
 }
 
 class PayLaterScreenState extends State<PayLaterScreen> {
+  // Use Repository
+  final HistoryRepository _historyRepository = HistoryRepository();
   late Future<List<CustomerDebt>> _payLaterFuture;
+
   final NumberFormat _rupiahFormat =
       NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
 
@@ -47,77 +47,44 @@ class PayLaterScreenState extends State<PayLaterScreen> {
     });
   }
 
-  /// Mengambil dan mengelompokkan data utang
   Future<List<CustomerDebt>> fetchPayLaterData() async {
-    // PERUBAHAN: Panggil 'getHistory' untuk mendapatkan semua data
     try {
-      final queryParams = {
-        'action': 'getHistory', // <-- PERUBAHAN: Panggil getHistory
-        'secret': kSecretKey,
-      };
-      final baseUri = Uri.parse(kApiUrl);
-      final urlWithParams = baseUri.replace(queryParameters: queryParams);
-      final response = await http.get(urlWithParams);
+      // 1. Get All History (Online or Offline)
+      final allHistory = await _historyRepository.getHistory();
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == false || data['error'] != null) {
-          throw Exception('API Error: ${data['error']}');
+      // 2. Filter only 'Belum Lunas'
+      final unpaidOrders =
+          allHistory.where((order) => order.status == 'Belum Lunas').toList();
+
+      // 3. Group by Customer
+      final Map<String, CustomerDebt> debtMap = {};
+      for (var order in unpaidOrders) {
+        if (debtMap.containsKey(order.userName)) {
+          debtMap[order.userName]!.orders.add(order);
+          debtMap[order.userName]!.totalUtang += order.totalPrice;
+        } else {
+          debtMap[order.userName] = CustomerDebt(
+            nama: order.userName,
+            totalUtang: order.totalPrice,
+            orders: [order],
+          );
         }
-
-        // PERUBAHAN: Parse data history lengkap
-        final List<dynamic> ordersJson = data['orders'];
-        final List<dynamic> itemsJson = data['order_items'];
-
-        List<OrderItemDetail> allItems =
-            itemsJson.map((json) => OrderItemDetail.fromJson(json)).toList();
-
-        List<OrderSummary> allHistory = ordersJson
-            .map((json) => OrderSummary.fromJson(json, allItems))
-            .toList();
-        // --- Akhir Parse ---
-
-        // Filter hanya yang belum lunas
-        final unpaidOrders =
-            allHistory.where((order) => order.status == 'Belum Lunas').toList();
-
-        // Kelompokkan berdasarkan nama
-        final Map<String, CustomerDebt> debtMap = {};
-        for (var order in unpaidOrders) {
-          if (debtMap.containsKey(order.userName)) {
-            // <-- PERUBAHAN: userName
-            // Tambahkan ke pelanggan yang ada
-            debtMap[order.userName]!.orders.add(order);
-            debtMap[order.userName]!.totalUtang +=
-                order.totalPrice; // <-- PERUBAHAN: totalPrice
-          } else {
-            // Buat entri pelanggan baru
-            debtMap[order.userName] = CustomerDebt(
-              nama: order.userName,
-              totalUtang: order.totalPrice, // <-- PERUBAHAN: totalPrice
-              orders: [order],
-            );
-          }
-        }
-
-        // Urutkan berdasarkan total utang (terbesar di atas)
-        final sortedList = debtMap.values.toList();
-        sortedList.sort((a, b) => b.totalUtang.compareTo(a.totalUtang));
-
-        return sortedList;
-      } else {
-        throw Exception(
-            'Gagal memuat data piutang (Status: ${response.statusCode})');
       }
+
+      final sortedList = debtMap.values.toList();
+      sortedList.sort((a, b) => b.totalUtang.compareTo(a.totalUtang));
+
+      return sortedList;
     } catch (e) {
       print(e);
       throw Exception('Gagal memuat data piutang: $e');
     }
   }
 
-  /// Menandai utang sebagai lunas
+  /// Mark as Paid (Online + Offline Fallback)
   Future<void> _markAsPaid(String orderID) async {
     try {
+      // 1. Try Online Request
       final queryParams = {
         'action': 'markAsPaid',
         'secret': kSecretKey,
@@ -125,7 +92,9 @@ class PayLaterScreenState extends State<PayLaterScreen> {
       };
       final baseUri = Uri.parse(kApiUrl);
       final urlWithParams = baseUri.replace(queryParameters: queryParams);
-      final response = await http.get(urlWithParams);
+
+      final response =
+          await http.get(urlWithParams).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -136,45 +105,56 @@ class PayLaterScreenState extends State<PayLaterScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          refreshData(); // Muat ulang data setelah berhasil
+          // Refresh will re-fetch and update UI
+          refreshData();
         } else {
           throw Exception(data['error'] ?? 'Gagal memperbarui status');
         }
       } else {
-        throw Exception(
-            'Gagal melunasi utang (Status: ${response.statusCode})');
+        throw Exception('Status Server: ${response.statusCode}');
       }
     } catch (e) {
+      // 2. Offline Fallback
+      print("Offline 'Mark as Paid' triggered for $orderID. Error: $e");
+
+      // Save to Pending Queue
+      await TransactionSyncService().saveOfflinePayLaterPayment(orderID);
+
+      // Update Local Cache immediately (Optimistic UI)
+      final db = await DatabaseHelper().database;
+      await db.update(
+        DatabaseHelper.tableCachedOrders,
+        {'status': 'Lunas'}, // Set status to Lunas locally
+        where: 'orderID = ?',
+        whereArgs: [orderID],
+      );
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error: $e'),
-          backgroundColor: Colors.red,
+        const SnackBar(
+          content: Text('Offline: Status disimpan. Akan dikirim saat online.'),
+          backgroundColor: Colors.orange,
         ),
       );
+
+      refreshData();
     }
   }
 
-  /// Menampilkan dialog konfirmasi pelunasan
   Future<void> _showConfirmationDialog(OrderSummary order) async {
-    // <-- PERUBAHAN: Model
     return showDialog<void>(
       context: context,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('Konfirmasi Pelunasan'),
-          // --- UBAH BAGIAN CONTENT ---
           content: SingleChildScrollView(
             child: ListBody(
               children: <Widget>[
-                // Pertanyaan konfirmasi
                 Text(
                   'Anda yakin ingin menandai utang Sdr/i ${order.userName} (ID: ${order.orderID}) sebagai LUNAS?',
                 ),
                 const SizedBox(height: 16),
-
-                // Detail item
-                Text(
+                const Text(
                   'DETAIL ITEM:',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
@@ -186,12 +166,10 @@ class PayLaterScreenState extends State<PayLaterScreen> {
                         '${item.qty} x ${_rupiahFormat.format(item.pricePerItem)}'),
                     dense: true,
                     visualDensity: VisualDensity.compact,
-                    contentPadding: EdgeInsets.zero, // Agar lebih rapat
+                    contentPadding: EdgeInsets.zero,
                   );
                 }).toList(),
                 const Divider(thickness: 1),
-
-                // Total
                 Padding(
                   padding: const EdgeInsets.only(top: 8.0),
                   child: Row(
@@ -251,82 +229,81 @@ class PayLaterScreenState extends State<PayLaterScreen> {
           final int totalSemuaUtang =
               debts.fold(0, (sum, item) => sum + item.totalUtang);
 
-          return Column(
-            children: [
-              // Card Total Piutang
-              Card(
-                margin: const EdgeInsets.all(8.0),
-                elevation: 4,
-                color: Colors.orange.shade100,
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        const Text(
-                          'Total Piutang (Belum Lunas)',
-                          style: TextStyle(fontSize: 16, color: Colors.black54),
-                        ),
-                        Text(
-                          // <-- PERBAIKAN: Menghapus 'child:'
-                          _rupiahFormat.format(totalSemuaUtang),
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineMedium
-                              ?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.orange.shade900),
-                        ),
-                      ],
+          return RefreshIndicator(
+            onRefresh: () async => refreshData(),
+            child: Column(
+              children: [
+                Card(
+                  margin: const EdgeInsets.all(8.0),
+                  elevation: 4,
+                  color: Colors.orange.shade100,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          const Text(
+                            'Total Piutang (Belum Lunas)',
+                            style:
+                                TextStyle(fontSize: 16, color: Colors.black54),
+                          ),
+                          Text(
+                            _rupiahFormat.format(totalSemuaUtang),
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineMedium
+                                ?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange.shade900),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              // Daftar Piutang per Pelanggan
-              Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.all(8.0),
-                  itemCount: debts.length,
-                  itemBuilder: (context, index) {
-                    final customerDebt = debts[index];
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 6.0),
-                      child: ExpansionTile(
-                        leading: const Icon(Icons.person),
-                        title: Text(
-                          customerDebt.nama,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(8.0),
+                    itemCount: debts.length,
+                    itemBuilder: (context, index) {
+                      final customerDebt = debts[index];
+                      return Card(
+                        margin: const EdgeInsets.symmetric(vertical: 6.0),
+                        child: ExpansionTile(
+                          leading: const Icon(Icons.person),
+                          title: Text(
+                            customerDebt.nama,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text(
+                            'Total Utang: ${_rupiahFormat.format(customerDebt.totalUtang)}',
+                            style: TextStyle(
+                                color: Colors.red.shade700,
+                                fontWeight: FontWeight.bold),
+                          ),
+                          trailing: Chip(
+                            label:
+                                Text('${customerDebt.orders.length} transaksi'),
+                          ),
+                          children: customerDebt.orders.map((order) {
+                            return ListTile(
+                              title: Text(
+                                  'ID: ${order.orderID} - ${_rupiahFormat.format(order.totalPrice)}'),
+                              subtitle: Text(
+                                  DateFormat('d MMM yyyy, HH:mm', 'id_ID')
+                                      .format(order.timestamp)),
+                              onTap: () => _showConfirmationDialog(order),
+                              trailing: Icon(Icons.info_outline,
+                                  color: Colors.blue.shade700),
+                            );
+                          }).toList(),
                         ),
-                        subtitle: Text(
-                          'Total Utang: ${_rupiahFormat.format(customerDebt.totalUtang)}',
-                          style: TextStyle(
-                              color: Colors.red.shade700,
-                              fontWeight: FontWeight.bold),
-                        ),
-                        trailing: Chip(
-                          label:
-                              Text('${customerDebt.orders.length} transaksi'),
-                        ),
-                        children: customerDebt.orders.map((order) {
-                          return ListTile(
-                            title: Text(
-                                'ID: ${order.orderID} - ${_rupiahFormat.format(order.totalPrice)}'),
-                            subtitle: Text(
-                                DateFormat('d MMM yyyy, HH:mm', 'id_ID')
-                                    .format(order.timestamp)),
-                            // UBAH: Jadikan list-nya yang bisa di-tap
-                            onTap: () => _showConfirmationDialog(order),
-                            // UBAH: Ganti tombol dengan ikon
-                            trailing: Icon(Icons.info_outline,
-                                color: Colors.blue.shade700),
-                          );
-                        }).toList(),
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           );
         },
       ),

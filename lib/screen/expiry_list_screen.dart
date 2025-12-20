@@ -1,9 +1,7 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import '/service/flutter_cart_service.dart';
-import '../app_config.dart';
+import '/service/product_repository.dart'; // Import Repository
 
 class ExpiryListScreen extends StatefulWidget {
   const ExpiryListScreen({Key? key}) : super(key: key);
@@ -13,45 +11,20 @@ class ExpiryListScreen extends StatefulWidget {
 }
 
 class ExpiryListScreenState extends State<ExpiryListScreen> {
+  // Use Repository instead of direct HTTP
+  final ProductRepository _productRepository = ProductRepository();
   late Future<List<Product>> _productsFuture;
 
   @override
   void initState() {
     super.initState();
-    _productsFuture = fetchProducts();
+    _productsFuture = _productRepository.getProducts();
   }
 
   void refreshProducts() {
     setState(() {
-      _productsFuture = fetchProducts();
+      _productsFuture = _productRepository.getProducts();
     });
-  }
-
-  Future<List<Product>> fetchProducts() async {
-    try {
-      final queryParams = {
-        'action': 'getProducts',
-        'secret': kSecretKey,
-      };
-      final baseUri = Uri.parse(kApiUrl);
-      final urlWithParams = baseUri.replace(queryParameters: queryParams);
-      final response = await http.get(urlWithParams);
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['success'] == false || data['error'] != null) {
-          throw Exception('API Error: ${data['error']}');
-        }
-        final List<dynamic> productListJson = data['products'];
-        return productListJson.map((json) => Product.fromJson(json)).toList();
-      } else {
-        throw Exception(
-            'Gagal memuat barang (Status code: ${response.statusCode})');
-      }
-    } catch (e) {
-      print(e);
-      throw Exception('Gagal memuat barang: $e');
-    }
   }
 
   /// Helper untuk menghitung sisa hari
@@ -62,7 +35,6 @@ class ExpiryListScreenState extends State<ExpiryListScreen> {
     try {
       final expiryDate = DateTime.parse(expiryDateString);
       final today = DateTime.now();
-      // Normalisasi hari ini ke tengah malam
       final todayMidnight = DateTime(today.year, today.month, today.day);
       final difference = expiryDate.difference(todayMidnight).inDays;
       return difference;
@@ -92,14 +64,12 @@ class ExpiryListScreenState extends State<ExpiryListScreen> {
           // --- Logika Filter dan Urut ---
           final List<Map<String, dynamic>> expiringProducts = [];
           for (var product in allProducts) {
-            // PERUBAHAN: Gunakan tanggal_kadaluwarsa
             final daysLeft = _getDaysUntilExpiry(product.tanggalKadaluwarsa);
             if (daysLeft != null) {
               expiringProducts.add({'product': product, 'daysLeft': daysLeft});
             }
           }
 
-          // Urutkan: yang paling cepat kadaluwarsa (hari terkecil) di atas
           expiringProducts
               .sort((a, b) => a['daysLeft'].compareTo(b['daysLeft']));
           // --- Selesai Logika ---
@@ -110,47 +80,49 @@ class ExpiryListScreenState extends State<ExpiryListScreen> {
             );
           }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(8.0),
-            itemCount: expiringProducts.length,
-            itemBuilder: (context, index) {
-              final item = expiringProducts[index];
-              final Product product = item['product'];
-              final int daysLeft = item['daysLeft'];
+          return RefreshIndicator(
+            onRefresh: () async => refreshProducts(),
+            child: ListView.builder(
+              padding: const EdgeInsets.all(8.0),
+              itemCount: expiringProducts.length,
+              itemBuilder: (context, index) {
+                final item = expiringProducts[index];
+                final Product product = item['product'];
+                final int daysLeft = item['daysLeft'];
 
-              // Tentukan warna berdasarkan sisa hari
-              Color chipColor = Colors.green.shade100;
-              Color textColor = Colors.green.shade900;
-              String expiryText = '$daysLeft hari lagi';
+                Color chipColor = Colors.green.shade100;
+                Color textColor = Colors.green.shade900;
+                String expiryText = '$daysLeft hari lagi';
 
-              if (daysLeft <= 0) {
-                chipColor = Colors.grey.shade300;
-                textColor = Colors.black;
-                expiryText = 'Kadaluwarsa';
-              } else if (daysLeft <= 7) {
-                chipColor = Colors.red.shade100;
-                textColor = Colors.red.shade900;
-              } else if (daysLeft <= 30) {
-                chipColor = Colors.amber.shade100;
-                textColor = Colors.amber.shade900;
-              }
+                if (daysLeft <= 0) {
+                  chipColor = Colors.grey.shade300;
+                  textColor = Colors.black;
+                  expiryText = 'Kadaluwarsa';
+                } else if (daysLeft <= 7) {
+                  chipColor = Colors.red.shade100;
+                  textColor = Colors.red.shade900;
+                } else if (daysLeft <= 30) {
+                  chipColor = Colors.amber.shade100;
+                  textColor = Colors.amber.shade900;
+                }
 
-              return Card(
-                margin: const EdgeInsets.symmetric(vertical: 4.0),
-                child: ListTile(
-                  title: Text(product.nama,
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text(
-                      'Stok: ${product.stok} | Kadaluwarsa: ${DateFormat('d MMM yyyy', 'id_ID').format(DateTime.parse(product.tanggalKadaluwarsa!))}'), // <-- PERUBAHAN
-                  trailing: Chip(
-                    label: Text(expiryText),
-                    backgroundColor: chipColor,
-                    labelStyle: TextStyle(
-                        color: textColor, fontWeight: FontWeight.bold),
+                return Card(
+                  margin: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: ListTile(
+                    title: Text(product.nama,
+                        style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text(
+                        'Stok: ${product.stok} | Kadaluwarsa: ${DateFormat('d MMM yyyy', 'id_ID').format(DateTime.parse(product.tanggalKadaluwarsa!))}'),
+                    trailing: Chip(
+                      label: Text(expiryText),
+                      backgroundColor: chipColor,
+                      labelStyle: TextStyle(
+                          color: textColor, fontWeight: FontWeight.bold),
+                    ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           );
         },
       ),

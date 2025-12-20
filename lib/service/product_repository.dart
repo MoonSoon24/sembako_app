@@ -78,8 +78,7 @@ class ProductRepository {
       return Product.fromJson({
         'nama': map['nama'],
         'stok': map['stok'],
-        'harga_jual': map[
-            'hargaJual'], // Map DB column back to JSON key expected by Model
+        'harga_jual': map['hargaJual'],
         'harga_beli': map['hargaBeli'],
         'kategori': map['kategori'],
         'tanggal_kadaluwarsa': map['tanggalKadaluwarsa'],
@@ -93,5 +92,31 @@ class ProductRepository {
     final categories = products.map((p) => p.kategori).toSet().toList();
     categories.sort();
     return categories;
+  }
+
+  Future<List<Map<String, dynamic>>> fetchTransactions() async {
+    try {
+      final response =
+          await http.get(Uri.parse("$kApiUrl?action=getTransactions"));
+      if (response.statusCode == 200) {
+        return List<Map<String, dynamic>>.from(json.decode(response.body));
+      }
+      throw Exception('Gagal memuat transaksi');
+    } catch (e) {
+      throw Exception('Error: $e');
+    }
+  }
+
+  // 3. Fetch Paylater
+  Future<List<Map<String, dynamic>>> fetchPaylater() async {
+    try {
+      final response = await http.get(Uri.parse("$kApiUrl?action=getPaylater"));
+      if (response.statusCode == 200) {
+        return List<Map<String, dynamic>>.from(json.decode(response.body));
+      }
+      throw Exception('Gagal memuat piutang');
+    } catch (e) {
+      throw Exception('Error: $e');
+    }
   }
 }
