@@ -77,9 +77,11 @@ class _ManageProductScreenState extends State<ManageProductScreen> {
     }
   }
 
-  // --- MODAL DIPERBARUI UNTUK EDIT SEMUA DETAIL ---
   void _showEditProductModal(Product product) {
-    // Inisialisasi controller dengan data produk
+    final _namaController = TextEditingController(text: product.nama);
+    final _stokController =
+        TextEditingController(text: product.stok.toString());
+
     final _hargaJualController =
         TextEditingController(text: product.hargaJual.toString());
     final _hargaBeliController =
@@ -87,13 +89,13 @@ class _ManageProductScreenState extends State<ManageProductScreen> {
     final _categoryController = TextEditingController(text: product.kategori);
     final _tanggalExpireController =
         TextEditingController(text: product.tanggalKadaluwarsa ?? '');
+
     DateTime? _selectedDate = product.tanggalKadaluwarsa != null
         ? DateTime.tryParse(product.tanggalKadaluwarsa!)
         : null;
 
     final _formKey = GlobalKey<FormState>();
 
-    // Helper untuk date picker di dalam modal
     Future<void> _selectDate(
         BuildContext context, Function(void Function()) modalSetState) async {
       final DateTime? picked = await showDatePicker(
@@ -114,20 +116,56 @@ class _ManageProductScreenState extends State<ManageProductScreen> {
     showDialog(
       context: context,
       builder: (BuildContext context) {
-        // Gunakan StatefulBuilder agar modal bisa update statenya sendiri (untuk date picker)
         return StatefulBuilder(
           builder: (context, modalSetState) {
+            // Deteksi apakah kategori adalah Top Up untuk mengubah label
+            final bool isTopUp =
+                _categoryController.text.trim().toLowerCase() == 'top up';
+
             return AlertDialog(
-              title: Text('Edit: ${product.nama}'),
+              title: Text('Edit Produk'),
               content: Form(
                 key: _formKey,
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                          "Nama barang tidak bisa diubah. Hapus dan buat baru jika perlu.",
-                          style: Theme.of(context).textTheme.bodySmall),
+                      // Field Nama: Kini bisa diedit
+                      TextFormField(
+                        controller: _namaController,
+                        decoration:
+                            const InputDecoration(labelText: 'Nama Barang'),
+                        validator: (value) => (value == null || value.isEmpty)
+                            ? 'Nama tidak boleh kosong'
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      // Field Stok: Kini bisa diedit secara manual
+                      TextFormField(
+                        controller: _stokController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
+                        decoration:
+                            const InputDecoration(labelText: 'Stok Saat Ini'),
+                        validator: (value) => (value == null || value.isEmpty)
+                            ? 'Stok tidak boleh kosong'
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _categoryController,
+                        decoration:
+                            const InputDecoration(labelText: 'Kategori'),
+                        onChanged: (value) {
+                          // Update UI jika kategori diubah menjadi/dari Top Up
+                          modalSetState(() {});
+                        },
+                        validator: (value) => (value == null || value.isEmpty)
+                            ? 'Kategori tidak boleh kosong'
+                            : null,
+                      ),
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _hargaJualController,
@@ -135,42 +173,31 @@ class _ManageProductScreenState extends State<ManageProductScreen> {
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly
                         ],
-                        decoration:
-                            const InputDecoration(labelText: 'Harga Jual'),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Harga Jual tidak boleh kosong';
-                          }
-                          return null;
-                        },
+                        decoration: InputDecoration(
+                          labelText:
+                              isTopUp ? 'Multiplier (Contoh: 1)' : 'Harga Jual',
+                          helperText:
+                              isTopUp ? 'Harga per nominal 1 Rupiah' : null,
+                        ),
+                        validator: (value) => (value == null || value.isEmpty)
+                            ? 'Harga Jual tidak boleh kosong'
+                            : null,
                       ),
                       const SizedBox(height: 16),
+                      // Label Harga Beli berubah menjadi Biaya Admin jika kategori Top Up
                       TextFormField(
                         controller: _hargaBeliController,
                         keyboardType: TextInputType.number,
                         inputFormatters: [
                           FilteringTextInputFormatter.digitsOnly
                         ],
-                        decoration: const InputDecoration(
-                            labelText: 'Harga Beli (Modal)'),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Harga Beli tidak boleh kosong';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: _categoryController,
-                        decoration:
-                            const InputDecoration(labelText: 'Kategori'),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Kategori tidak boleh kosong';
-                          }
-                          return null;
-                        },
+                        decoration: InputDecoration(
+                          labelText:
+                              isTopUp ? 'Biaya Admin' : 'Harga Beli (Modal)',
+                        ),
+                        validator: (value) => (value == null || value.isEmpty)
+                            ? 'Harga Beli tidak boleh kosong'
+                            : null,
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
@@ -205,13 +232,16 @@ class _ManageProductScreenState extends State<ManageProductScreen> {
                       : () async {
                           if (_formKey.currentState!.validate()) {
                             setState(() => _isLoading = true);
-                            Navigator.pop(context); // Tutup dialog
+                            Navigator.pop(context);
 
-                            // Gunakan action 'updateProduct'
                             await _runApiAction(
                               action: 'updateProduct',
                               params: {
-                                'nama': product.nama, // Kunci pencarian
+                                'oldNama': product
+                                    .nama, // Gunakan nama lama sebagai ID pencarian di sheet
+                                'nama': _namaController
+                                    .text, // Nama baru (bisa sama atau beda)
+                                'stok': _stokController.text, // Stok baru
                                 'harga_jual': _hargaJualController.text,
                                 'harga_beli': _hargaBeliController.text,
                                 'kategori': _categoryController.text,

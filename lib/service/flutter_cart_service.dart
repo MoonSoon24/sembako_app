@@ -36,29 +36,39 @@ class Product {
   }
 }
 
-/// Class wrapper yang menyimpan Produk dan kuantitas di keranjang.
 class CartItem {
   final Product product;
   int quantity;
 
   CartItem({required this.product, this.quantity = 1});
 
-  /// Kalkulasi subtotal berdasarkan harga jual.
-  int get subtotal => product.hargaJual * quantity;
+  // Updated subtotal logic
+  int get subtotal {
+    if (product.kategori == 'Top Up') {
+      // (Nominal * Multiplier) + Admin Fee
+      return (quantity * product.hargaJual) + product.hargaBeli;
+    }
+    return product.hargaJual * quantity;
+  }
 
-  /// <-- BARU: Kalkulasi total modal untuk item ini.
-  int get totalModal => product.hargaBeli * quantity;
+  // Updated modal (cost) logic
+  int get totalModal {
+    if (product.kategori == 'Top Up') {
+      // The "cost" to the shop is just the nominal amount sent to the user
+      return quantity * product.hargaJual;
+    }
+    return product.hargaBeli * quantity;
+  }
 
-  /// <-- BARU: Kalkulasi total margin untuk item ini.
   int get subtotalMargin => subtotal - totalModal;
 
-  /// Mengonversi item keranjang ke map yang siap JSON.
   Map<String, dynamic> toJson() {
     return {
       'nama': product.nama,
-      'kuantitas': quantity, // <-- PERUBAHAN NAMA
-      'harga_jual': product.hargaJual, // <-- PERUBAHAN NAMA
+      'kuantitas': quantity,
+      'harga_jual': product.hargaJual,
       'harga_beli': product.hargaBeli,
+      'kategori': product.kategori, // Added to help report identification
     };
   }
 }
@@ -148,7 +158,8 @@ class CartService extends ChangeNotifier {
       'change': change.toString(),
       'paymentMethod': paymentMethod,
       'total': totalPrice.toString(), // Ini adalah 'Total Belanja'
-      'items': jsonEncode(orderItems), // Mengirim JSON (nama, kuantitas, harga_jual, harga_beli)
+      'items': jsonEncode(
+          orderItems), // Mengirim JSON (nama, kuantitas, harga_jual, harga_beli)
     };
 
     final baseUri = Uri.parse(kApiUrl);

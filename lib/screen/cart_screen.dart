@@ -236,12 +236,16 @@ class _CartScreenState extends State<CartScreen> {
                                 ],
                               ),
                               const SizedBox(height: 8),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.start,
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // PERUBAHAN: Tampilkan harga jual
-                                  Text(
-                                      '${formatHargaLokal(item.product.hargaJual)} / item'),
+                                  if (item.product.kategori == 'Top Up') ...[
+                                    Text('Nominal: Rp ${item.quantity}'),
+                                    Text(
+                                        'Biaya Admin: Rp ${item.product.hargaBeli}'),
+                                  ] else
+                                    Text(
+                                        '${formatHargaLokal(item.product.hargaJual)} / item'),
                                 ],
                               ),
                               const SizedBox(height: 8),

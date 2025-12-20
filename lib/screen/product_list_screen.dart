@@ -236,8 +236,23 @@ class ProductListScreenState extends State<ProductListScreen> {
   // <-- Akhir widget baru -->
 
   Widget _buildBottomPanel() {
-    // ... (Fungsi ini tidak berubah, salin dari kode lama) ...
     if (_selectedProduct == null) {
+      return const SizedBox.shrink();
+    }
+
+    final cart = context.watch<CartService>();
+    final isTopUp = _selectedProduct!.kategori == 'Top Up';
+    final currentQuantity = cart.getProductQuantity(_selectedProduct!);
+
+    if (currentQuantity == 0 && !isTopUp) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _selectedProduct != null) {
+          setState(() {
+            _selectedProduct = null;
+            _panelHeight = 0.0;
+          });
+        }
+      });
       return const SizedBox.shrink();
     }
 
@@ -253,20 +268,11 @@ class ProductListScreenState extends State<ProductListScreen> {
       }
     });
 
-    final cart = context.watch<CartService>();
-
-    final currentQuantity = cart.getProductQuantity(_selectedProduct!);
-    if (currentQuantity == 0) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        setState(() {
-          _selectedProduct = null;
-          _panelHeight = 0.0;
-        });
-      });
-      return const SizedBox.shrink();
+    // Only update the controller text if the user isn't actively typing
+    // (to avoid cursor jumps), or if it's a regular item.
+    if (!isTopUp) {
+      _quantityController.text = '$currentQuantity';
     }
-
-    _quantityController.text = '$currentQuantity';
 
     return Card(
       key: _panelKey,
@@ -276,9 +282,9 @@ class ProductListScreenState extends State<ProductListScreen> {
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            // HEADER: Nama Produk & Tombol Close (Selalu muncul)
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -304,58 +310,77 @@ class ProductListScreenState extends State<ProductListScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.remove_circle_outline),
-                  color: Colors.red.shade700,
-                  onPressed: () {
-                    cart.removeItem(_selectedProduct!);
-                    int newQty = cart.getProductQuantity(_selectedProduct!);
-                    if (newQty == 0) {
-                      setState(() {
-                        _selectedProduct = null;
-                        _panelHeight = 0.0;
-                      });
-                    }
-                  },
+
+            if (isTopUp)
+              TextField(
+                controller: _quantityController,
+                keyboardType: TextInputType.number,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Nominal Top Up',
+                  hintText: 'Masukkan nominal...',
+                  prefixText: 'Rp ',
+                  border: OutlineInputBorder(),
                 ),
-                SizedBox(
-                  width: 50,
-                  height: 35,
-                  child: TextField(
-                    controller: _quantityController,
-                    keyboardType: TextInputType.number,
-                    textAlign: TextAlign.center,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                    onSubmitted: (value) {
-                      final newQty = int.tryParse(value) ?? 0;
-                      cart.setItemQuantity(_selectedProduct!, newQty);
-                      int finalQty = cart.getProductQuantity(_selectedProduct!);
-                      setState(() {
-                        if (finalQty == 0) {
+                onChanged: (value) {
+                  final nominal = value.isEmpty ? 0 : int.tryParse(value) ?? 0;
+                  cart.setItemQuantity(_selectedProduct!, nominal);
+                },
+              )
+            else
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove_circle_outline),
+                    color: Colors.red.shade700,
+                    onPressed: () {
+                      cart.removeItem(_selectedProduct!);
+                      int newQty = cart.getProductQuantity(_selectedProduct!);
+                      if (newQty == 0) {
+                        setState(() {
                           _selectedProduct = null;
                           _panelHeight = 0.0;
-                        } else {
-                          _quantityController.text = '$finalQty';
-                        }
-                      });
+                        });
+                      }
                     },
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.add_circle_outline),
-                  color: Colors.green.shade700,
-                  onPressed: () {
-                    cart.addItem(_selectedProduct!);
-                  },
-                ),
-              ],
-            ),
+                  SizedBox(
+                    width: 50,
+                    height: 35,
+                    child: TextField(
+                      controller: _quantityController,
+                      keyboardType: TextInputType.number,
+                      textAlign: TextAlign.center,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                      onSubmitted: (value) {
+                        final newQty = int.tryParse(value) ?? 0;
+                        cart.setItemQuantity(_selectedProduct!, newQty);
+                        int finalQty =
+                            cart.getProductQuantity(_selectedProduct!);
+                        setState(() {
+                          if (finalQty == 0) {
+                            _selectedProduct = null;
+                            _panelHeight = 0.0;
+                          } else {
+                            _quantityController.text = '$finalQty';
+                          }
+                        });
+                      },
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline),
+                    color: Colors.green.shade700,
+                    onPressed: () {
+                      cart.addItem(_selectedProduct!);
+                    },
+                  ),
+                ],
+              ),
           ],
         ),
       ),
@@ -363,11 +388,14 @@ class ProductListScreenState extends State<ProductListScreen> {
   }
 
   Widget _buildCartFab() {
-    // ... (Fungsi ini tidak berubah, salin dari kode lama) ...
     return Consumer<CartService>(
       builder: (context, cart, child) {
-        final totalItems =
-            cart.items.fold<int>(0, (prev, item) => prev + item.quantity);
+        final totalItems = cart.items.fold<int>(0, (prev, item) {
+          if (item.product.kategori == 'Top Up') {
+            return prev + 1; //
+          }
+          return prev + item.quantity; //
+        });
 
         return FloatingActionButton.extended(
           onPressed: () {
@@ -376,7 +404,7 @@ class ProductListScreenState extends State<ProductListScreen> {
               MaterialPageRoute(builder: (context) => const CartScreen()),
             );
           },
-          label: const Text('Keranjang  \u2192'), // \u2192 is the right arrow
+          label: const Text('Keranjang  →'),
           icon: Badge(
             label: Text('$totalItems'),
             isLabelVisible: totalItems > 0,
@@ -601,15 +629,30 @@ class ProductListScreenState extends State<ProductListScreen> {
                                   : null,
                               onTap: () {
                                 final cart = context.read<CartService>();
+                                final isTopUp = product.kategori ==
+                                    'Top Up'; // Add this check
+
                                 int currentQty =
                                     cart.getProductQuantity(product);
+
                                 if (currentQty == 0) {
-                                  cart.addItem(product);
-                                  currentQty = 1;
+                                  if (isTopUp) {
+                                    // For Top Up, we don't auto-add 1. We keep it 0 until user inputs.
+                                    cart.setItemQuantity(product, 0);
+                                  } else {
+                                    // Regular items still start at 1
+                                    cart.addItem(product);
+                                    currentQty = 1;
+                                  }
                                 }
+
                                 setState(() {
                                   _selectedProduct = product;
-                                  _quantityController.text = '1';
+                                  // If it's a Top Up and quantity is 0, show empty/zero. Otherwise show current.
+                                  _quantityController.text =
+                                      (isTopUp && currentQty == 0)
+                                          ? ''
+                                          : '$currentQty';
                                 });
 
                                 ScaffoldMessenger.of(context)

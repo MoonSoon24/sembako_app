@@ -1,15 +1,13 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 
-// --- DATA MODEL BARU ---
-
-/// Mewakili satu item dalam 'order_items'
 class OrderItemDetail {
   final String orderID;
   final String nama;
   final int qty;
-  final int pricePerItem; // Ini adalah harga_jual
+  final int pricePerItem;
   final int hargaBeli;
+  final String kategori; 
 
   OrderItemDetail({
     required this.orderID,
@@ -17,6 +15,7 @@ class OrderItemDetail {
     required this.qty,
     required this.pricePerItem,
     required this.hargaBeli,
+    this.kategori = '',
   });
 
   factory OrderItemDetail.fromJson(Map<String, dynamic> json) {
@@ -26,12 +25,30 @@ class OrderItemDetail {
       qty: int.tryParse(json['kuantitas']?.toString() ?? '0') ?? 0,
       pricePerItem: int.tryParse(json['harga_jual']?.toString() ?? '0') ?? 0,
       hargaBeli: int.tryParse(json['harga_beli']?.toString() ?? '0') ?? 0,
+      kategori: json['kategori']?.toString() ?? '',
     );
   }
 
-  // Kalkulasi margin untuk item ini
-  int get totalMargin => (pricePerItem - hargaBeli) * qty;
-  int get totalOmset => pricePerItem * qty;
+  // Helper to identify if this is a top-up entry
+  bool get _isTopUp => kategori == 'Top Up' || pricePerItem == 1;
+
+  // FIXED MARGIN CALCULATION
+  int get totalMargin {
+    if (_isTopUp) {
+      // For Top Up, the profit is exactly the Admin Fee (hargaBeli)
+      return hargaBeli;
+    }
+    return (pricePerItem - hargaBeli) * qty;
+  }
+
+  // FIXED OMSET CALCULATION
+  int get totalOmset {
+    if (_isTopUp) {
+      // (Nominal * Multiplier) + Admin Fee
+      return (qty * pricePerItem) + hargaBeli;
+    }
+    return pricePerItem * qty;
+  }
 }
 
 /// Mewakili satu baris 'orders' (ringkasan)

@@ -11,6 +11,7 @@ import '/screen/expiry_list_screen.dart';
 import '/screen/paylater_screen.dart'; // <-- BARU: Layar Piutang
 import '/screen/dashboard_laporan_screen.dart'; // <-- BARU: Layar Laporan
 import '/service/stock_cart_service.dart';
+import '/service/theme_service.dart';
 
 // --- (main() function is correct, no changes needed) ---
 void main() async {
@@ -22,6 +23,8 @@ void main() async {
       providers: [
         ChangeNotifierProvider(create: (context) => CartService()),
         ChangeNotifierProvider(create: (context) => StockCartService()),
+        ChangeNotifierProvider(
+            create: (context) => ThemeService()), // Add this line
       ],
       child: const MyApp(),
     ),
@@ -33,9 +36,12 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeService = context.watch<ThemeService>();
     return MaterialApp(
       title: 'Toko Sembako',
+      themeMode: themeService.themeMode, // Use current theme mode
       theme: ThemeData(
+        brightness: Brightness.light,
         primarySwatch: Colors.blue,
         scaffoldBackgroundColor: Colors.grey[50],
         appBarTheme: AppBarTheme(
@@ -61,6 +67,11 @@ class MyApp extends StatelessWidget {
           ),
         ),
       ),
+      darkTheme: ThemeData(
+        brightness: Brightness.dark,
+        primarySwatch: Colors.blue,
+      ),
+
       debugShowCheckedModeBanner: false,
       home: const MainScreen(),
       locale: const Locale('id', 'ID'),
@@ -212,6 +223,37 @@ class _MainScreenState extends State<MainScreen> {
             ),
           ] else
             const SizedBox(width: 10),
+
+          // <-- BARU: 3-Dot Settings Menu -->
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'Pengaturan',
+            onSelected: (value) {
+              if (value == 'theme') {
+                // Mengakses ThemeService untuk mengganti tema
+                context.read<ThemeService>().toggleTheme();
+              }
+            },
+            itemBuilder: (BuildContext context) {
+              // Mengambil status tema saat ini untuk label menu
+              final isDark = context.read<ThemeService>().isDarkMode;
+              return [
+                PopupMenuItem<String>(
+                  value: 'theme',
+                  child: Row(
+                    children: [
+                      Icon(
+                        isDark ? Icons.light_mode : Icons.dark_mode,
+                        color: isDark ? Colors.amber : Colors.grey.shade700,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(isDark ? 'Mode Terang' : 'Mode Gelap'),
+                    ],
+                  ),
+                ),
+              ];
+            },
+          ),
         ],
       ),
       drawer: Drawer(
