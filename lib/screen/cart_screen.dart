@@ -4,8 +4,11 @@ import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+
 import '/service/flutter_cart_service.dart';
-import '../app_config.dart';
+import '/service/transaction_sync.dart';
+import '/app_config.dart';
 
 class CartScreen extends StatefulWidget {
   const CartScreen({Key? key}) : super(key: key);
@@ -17,6 +20,7 @@ class CartScreen extends StatefulWidget {
 class _CartScreenState extends State<CartScreen> {
   bool _isPlacingOrder = false;
   final _nameController = TextEditingController();
+  final TransactionSyncService _syncService = TransactionSyncService();
 
   @override
   void dispose() {
@@ -24,12 +28,10 @@ class _CartScreenState extends State<CartScreen> {
     super.dispose();
   }
 
-  /// Menangani tombol "Place Order"
   Future<bool> _onPlaceOrder(CartService cart, int paymentAmount, int change,
       String paymentMethod) async {
     if (cart.items.isEmpty) return false;
 
-    // VALIDASI BARU: Wajib isi nama jika PayLater
     if (paymentMethod == 'PayLater' && _nameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -37,7 +39,7 @@ class _CartScreenState extends State<CartScreen> {
           backgroundColor: Colors.red,
         ),
       );
-      return false; // Hentikan proses
+      return false;
     }
 
     setState(() {
@@ -48,26 +50,68 @@ class _CartScreenState extends State<CartScreen> {
         ? _nameController.text.trim()
         : 'Guest';
 
+    final transactionData = {
+      'action': 'add_transaction',
+      'secret': kSecretKey,
+      'date': DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now()),
+      'total': cart.totalPrice,
+      'items': cart.items
+          .map((item) => {
+                'nama': item.product.nama,
+                'qty': item.quantity,
+                'harga': item.product.hargaJual,
+                'subtotal': item.subtotal
+              })
+          .toList(),
+      'customerName': userName,
+      'paymentMethod': paymentMethod,
+      'paymentAmount': paymentAmount,
+      'change': change,
+    };
+
     String? errorMessage;
-    String successMessage = '';
+    bool isOfflineSuccess = false;
 
     try {
-      // Panggil service placeOrder, sekarang lebih simpel
-      // Service akan otomatis mengambil items dari dirinya sendiri
-      bool success = await cart.placeOrder(
-        userName: userName,
-        paymentAmount: paymentAmount,
-        change: change,
-        paymentMethod: paymentMethod,
-      );
+      final connectivityResult = await Connectivity().checkConnectivity();
+      final bool isOffline = connectivityResult == ConnectivityResult.none ||
+          (connectivityResult is List &&
+              connectivityResult.contains(ConnectivityResult.none));
 
-      if (success) {
-        successMessage = 'Pesanan berhasil disimpan!';
+      if (isOffline) {
+        await _syncService.saveOfflineTransaction(transactionData);
+        isOfflineSuccess = true;
       } else {
-        errorMessage = 'Gagal menyimpan pesanan. Cek koneksi atau stok.';
+        try {
+          print("Attempting Online Upload...");
+          // We must treat 302 as a potential success because Google Apps Script always redirects.
+          // However, standard http.post follows redirects automatically.
+          // If we see 302 in the final response, it means it stopped following OR the final response is 302.
+          final response = await http
+              .post(
+                Uri.parse(kApiUrl),
+                headers: {'Content-Type': 'application/json'},
+                body: json.encode(transactionData),
+              )
+              .timeout(const Duration(seconds: 15));
+
+          print("Online Response Code: ${response.statusCode}");
+          print("Online Response Body: ${response.body}");
+
+          // Accept 200 (OK) and 302 (Found/Redirect) as success
+          if (response.statusCode == 200 || response.statusCode == 302) {
+            // Success
+          } else {
+            throw Exception('Server Error: ${response.statusCode}');
+          }
+        } catch (e) {
+          print("Online checkout failed ($e), saving offline...");
+          await _syncService.saveOfflineTransaction(transactionData);
+          isOfflineSuccess = true;
+        }
       }
     } catch (e) {
-      errorMessage = 'Error koneksi: $e';
+      errorMessage = 'Gagal memproses transaksi: $e';
     }
 
     if (!mounted) return false;
@@ -75,12 +119,32 @@ class _CartScreenState extends State<CartScreen> {
     if (errorMessage == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(successMessage),
-          backgroundColor: Colors.green,
+          content: Row(
+            children: [
+              Icon(
+                isOfflineSuccess ? Icons.save_as : Icons.check_circle,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(isOfflineSuccess
+                    ? 'Disimpan OFFLINE. Cek menu "Transaksi Offline".'
+                    : 'Pesanan berhasil disimpan (Online)!'),
+              ),
+            ],
+          ),
+          backgroundColor: isOfflineSuccess ? Colors.orange[800] : Colors.green,
+          duration: const Duration(seconds: 3),
         ),
       );
-      cart.clearCart();
-      Navigator.of(context).pop(); // Tutup CartScreen
+
+      try {
+        cart.clearCart();
+      } catch (e) {
+        // ignore
+      }
+
+      Navigator.of(context).pop();
       return true;
     } else {
       setState(() {
@@ -96,9 +160,8 @@ class _CartScreenState extends State<CartScreen> {
     }
   }
 
-  /// Menampilkan dialog untuk set kuantitas
   Future<void> _showQuantityDialog(
-      BuildContext context, CartService cart, Product product) async {
+      BuildContext context, CartService cart, dynamic product) async {
     final quantityController = TextEditingController(
         text: cart.getProductQuantity(product).toString());
 
@@ -112,9 +175,7 @@ class _CartScreenState extends State<CartScreen> {
             keyboardType: TextInputType.number,
             autofocus: true,
             decoration: const InputDecoration(hintText: 'Masukkan kuantitas'),
-            inputFormatters: [
-              FilteringTextInputFormatter.digitsOnly
-            ], // Hanya angka
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           ),
           actions: <Widget>[
             TextButton(
@@ -137,9 +198,8 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  /// Menampilkan dialog konfirmasi hapus
   Future<void> _showDeleteConfirmationDialog(
-      BuildContext context, CartService cart, Product product) async {
+      BuildContext context, CartService cart, dynamic product) async {
     return showDialog<void>(
       context: context,
       builder: (BuildContext dialogContext) {
@@ -167,16 +227,14 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  /// Menampilkan dialog pembayaran
   Future<void> _showPaymentDialog(
       BuildContext context, CartService cart) async {
     return showDialog<void>(
       context: context,
-      barrierDismissible: !_isPlacingOrder, // Cegah tutup saat loading
+      barrierDismissible: !_isPlacingOrder,
       builder: (BuildContext dialogContext) {
         return _PaymentDialogContent(
           cart: cart,
-          // <-- BARU: Kirim nama pelanggan ke dialog
           customerName: _nameController.text.trim(),
           onPlaceOrder: (int paymentAmount, int change, String paymentMethod) {
             return _onPlaceOrder(cart, paymentAmount, change, paymentMethod);
@@ -325,7 +383,7 @@ class _CartScreenState extends State<CartScreen> {
                 TextField(
                   controller: _nameController,
                   decoration: InputDecoration(
-                    labelText: 'Nama Pelanggan', // <-- Label diubah
+                    labelText: 'Nama Pelanggan',
                     hintText: 'Wajib diisi jika PayLater',
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12)),
@@ -372,10 +430,9 @@ class _CartScreenState extends State<CartScreen> {
   }
 }
 
-// Widget ini mengelola state internal dialog pembayaran
 class _PaymentDialogContent extends StatefulWidget {
   final CartService cart;
-  final String customerName; // <-- BARU
+  final String customerName;
   final Future<bool> Function(
     int paymentAmount,
     int change,
@@ -436,9 +493,8 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
         _change = 0;
         _canPlaceOrder = true;
       } else if (_paymentMethod == 'PayLater') {
-        _paymentAmount = widget.cart.totalPrice; // Total utang
+        _paymentAmount = widget.cart.totalPrice;
         _change = 0;
-        // VALIDASI BARU: Bisa PayLater HANYA jika nama pelanggan diisi
         _canPlaceOrder = widget.customerName.trim().isNotEmpty;
       }
     });
@@ -512,7 +568,7 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
             DropdownButton<String>(
               value: _paymentMethod,
               isExpanded: true,
-              items: ['Cash', 'QRIS', 'PayLater'] // <-- BARU: Tambah PayLater
+              items: ['Cash', 'QRIS', 'PayLater']
                   .map((method) => DropdownMenuItem(
                         value: method,
                         child: Text(method),
@@ -587,7 +643,6 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
                 'Silakan scan QRIS untuk membayar ${_rupiahFormat.format(widget.cart.totalPrice)}',
                 textAlign: TextAlign.center,
               ),
-            // <-- BARU: Tampilan untuk PayLater -->
             if (_paymentMethod == 'PayLater')
               Column(
                 children: [
@@ -623,7 +678,6 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
                     _isDialogLoading = true;
                   });
 
-                  // Tentukan paymentAmount dan change untuk PayLater
                   int finalPaymentAmount =
                       _paymentMethod == 'PayLater' ? 0 : _paymentAmount;
                   int finalChange = _paymentMethod == 'PayLater' ? 0 : _change;
@@ -636,7 +690,6 @@ class _PaymentDialogContentState extends State<_PaymentDialogContent> {
                   if (success) {
                     Navigator.of(context).pop();
                   } else {
-                    // Jika gagal (cth: nama kosong), dialog tetap terbuka
                     setState(() {
                       _isDialogLoading = false;
                     });

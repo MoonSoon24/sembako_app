@@ -8,6 +8,7 @@ import 'cart_screen.dart';
 import 'add_product_screen.dart';
 import '../app_config.dart';
 import 'manage_product_screen.dart';
+import '/service/product_repository.dart';
 
 class ProductListScreen extends StatefulWidget {
   const ProductListScreen({Key? key}) : super(key: key);
@@ -17,9 +18,9 @@ class ProductListScreen extends StatefulWidget {
 }
 
 class ProductListScreenState extends State<ProductListScreen> {
-  late Future<List<Product>> _productsFuture;
+  final ProductRepository _repository = ProductRepository();
 
-  // <-- BARU: State untuk kategori -->
+  late Future<List<Product>> _productsFuture;
   List<String> _allCategories = ["Semua Kategori"];
   String _selectedCategory = "Semua Kategori";
   bool _isLoadingCategories = true;
@@ -48,12 +49,30 @@ class ProductListScreenState extends State<ProductListScreen> {
     super.dispose();
   }
 
-  // <-- PERUBAHAN: Ganti nama jadi refreshAllData & panggil _loadCategories -->
+  // Optimized refresh: Fetch data once via Repository
   void refreshProducts() {
     setState(() {
-      _productsFuture = fetchProducts();
-      _loadCategories(); // <-- BARU: Muat ulang kategori juga
+      _productsFuture = _loadData();
     });
+  }
+
+  Future<List<Product>> _loadData() async {
+    // 1. Fetch Products (Online -> Offline Fallback handled by Repo)
+    final products = await _repository.getProducts();
+
+    // 2. Extract Categories from the fetched products dynamically
+    // This saves an extra API call and ensures categories match actual available products
+    final categories = products.map((p) => p.kategori).toSet().toList();
+    categories.sort();
+
+    if (mounted) {
+      setState(() {
+        _allCategories = ["Semua Kategori", ...categories];
+        _isLoadingCategories = false;
+      });
+    }
+
+    return products;
   }
 
   Future<List<Product>> fetchProducts() async {
@@ -398,6 +417,7 @@ class ProductListScreenState extends State<ProductListScreen> {
         });
 
         return FloatingActionButton.extended(
+          heroTag: "cart_fab",
           onPressed: () {
             Navigator.push(
               context,
@@ -490,8 +510,8 @@ class ProductListScreenState extends State<ProductListScreen> {
   }
 
   Widget _buildAdminFab() {
-    // ... (Fungsi ini tidak berubah) ...
     return FloatingActionButton(
+      heroTag: "admin_fab",
       onPressed: () => _showAdminMenu(context),
       backgroundColor: Colors.green.shade700,
       child: const Icon(Icons.add),

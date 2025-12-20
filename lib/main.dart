@@ -3,6 +3,12 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import '/service/flutter_cart_service.dart'; // Layanan keranjang Anda
 import '/screen/product_list_screen.dart';
 import '/screen/cart_screen.dart';
@@ -12,19 +18,22 @@ import '/screen/paylater_screen.dart'; // <-- BARU: Layar Piutang
 import '/screen/dashboard_laporan_screen.dart'; // <-- BARU: Layar Laporan
 import '/service/stock_cart_service.dart';
 import '/service/theme_service.dart';
+import '/service/transaction_sync.dart';
+import '/widget/offline_indicator.dart';
+import '/screen/offline_transaction_screen.dart';
 
-// --- (main() function is correct, no changes needed) ---
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('id_ID', null);
+
+  TransactionSyncService().startAutoSync();
 
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (context) => CartService()),
         ChangeNotifierProvider(create: (context) => StockCartService()),
-        ChangeNotifierProvider(
-            create: (context) => ThemeService()), // Add this line
+        ChangeNotifierProvider(create: (context) => ThemeService()),
       ],
       child: const MyApp(),
     ),
@@ -39,7 +48,9 @@ class MyApp extends StatelessWidget {
     final themeService = context.watch<ThemeService>();
     return MaterialApp(
       title: 'Toko Sembako',
-      themeMode: themeService.themeMode, // Use current theme mode
+      themeMode: themeService.themeMode,
+
+      // --- Light Theme ---
       theme: ThemeData(
         brightness: Brightness.light,
         primarySwatch: Colors.blue,
@@ -58,22 +69,28 @@ class MyApp extends StatelessWidget {
             ),
             padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
           ),
-        ), // <--- !! KEMUNGKINAN BESAR ERRORNYA DI SINI (KOMA HILANG) !!
+        ),
         cardTheme: CardThemeData(
-          // <-- PERBAIKAN: Seharusnya CardThemeData
           elevation: 1,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
         ),
       ),
+
+      // --- Dark Theme ---
       darkTheme: ThemeData(
         brightness: Brightness.dark,
         primarySwatch: Colors.blue,
       ),
 
       debugShowCheckedModeBanner: false,
-      home: const MainScreen(),
+
+      // --- Implementasi Offline Indicator ---
+      home: const OfflineIndicator(
+        child: MainScreen(),
+      ),
+
       locale: const Locale('id', 'ID'),
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
@@ -88,7 +105,6 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// --- (Class MainScreen dan _MainScreenState sudah benar, tidak ada perubahan) ---
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
 
@@ -106,7 +122,6 @@ class _MainScreenState extends State<MainScreen> {
       GlobalKey<HistoryScreenState>();
   final GlobalKey<ExpiryListScreenState> _expiryListKey =
       GlobalKey<ExpiryListScreenState>();
-  // <-- BARU: Key untuk layar baru
   final GlobalKey<PayLaterScreenState> _payLaterKey =
       GlobalKey<PayLaterScreenState>();
   final GlobalKey<DashboardLaporanScreenState> _dashboardKey =
@@ -118,8 +133,8 @@ class _MainScreenState extends State<MainScreen> {
     'Daftar Barang',
     'Riwayat Transaksi',
     'Monitoring Kadaluwarsa',
-    'Daftar Piutang (PayLater)', // <-- BARU
-    'Dashboard Laporan', // <-- BARU
+    'Daftar Piutang (PayLater)',
+    'Dashboard Laporan',
   ];
 
   @override
@@ -129,8 +144,8 @@ class _MainScreenState extends State<MainScreen> {
       ProductListScreen(key: _productListKey),
       HistoryScreen(key: _historyKey, selectedDate: _selectedDate),
       ExpiryListScreen(key: _expiryListKey),
-      PayLaterScreen(key: _payLaterKey), // <-- BARU
-      DashboardLaporanScreen(key: _dashboardKey), // <-- BARU
+      PayLaterScreen(key: _payLaterKey),
+      DashboardLaporanScreen(key: _dashboardKey),
     ];
   }
 
@@ -185,7 +200,7 @@ class _MainScreenState extends State<MainScreen> {
       appBar: AppBar(
         title: Text(_titles[_selectedScreenIndex]),
         actions: [
-          // Logika refresh diperbarui
+          // Logika refresh
           if ([0, 1, 2, 3, 4].contains(_selectedScreenIndex))
             IconButton(
               icon: const Icon(Icons.refresh),
@@ -204,6 +219,7 @@ class _MainScreenState extends State<MainScreen> {
               },
               tooltip: 'Muat Ulang Data',
             ),
+
           // Filter tanggal hanya muncul di Riwayat Transaksi
           if (_selectedScreenIndex == 1) ...[
             if (_selectedDate != null)
@@ -224,18 +240,16 @@ class _MainScreenState extends State<MainScreen> {
           ] else
             const SizedBox(width: 10),
 
-          // <-- BARU: 3-Dot Settings Menu -->
+          // Menu Pengaturan (3 Dots)
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             tooltip: 'Pengaturan',
             onSelected: (value) {
               if (value == 'theme') {
-                // Mengakses ThemeService untuk mengganti tema
                 context.read<ThemeService>().toggleTheme();
               }
             },
             itemBuilder: (BuildContext context) {
-              // Mengambil status tema saat ini untuk label menu
               final isDark = context.read<ThemeService>().isDarkMode;
               return [
                 PopupMenuItem<String>(
@@ -302,7 +316,20 @@ class _MainScreenState extends State<MainScreen> {
               selected: _selectedScreenIndex == 4,
               onTap: () => _selectScreen(4),
             ),
-            const Divider(), // Pemisah
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.sync_problem, color: Colors.orange),
+              title: const Text('Transaksi Offline'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (context) => const OfflineTransactionScreen()),
+                );
+              },
+            ),
+            const Divider(),
             ListTile(
               leading: const Icon(Icons.shopping_cart),
               title: const Text('Keranjang'),

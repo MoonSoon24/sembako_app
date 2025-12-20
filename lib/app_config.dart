@@ -2,7 +2,7 @@
 
 // URL API Google Apps Script Anda
 const String kApiUrl =
-    "https://script.google.com/macros/s/AKfycbwb2UHwAjBqOIFY5XMiUEkUupSxo1rQrNIWlgzcWYzbk4_fJf1GlB_Ohfuan1Vf4DS9GA/exec";
+    "https://script.google.com/macros/s/AKfycby2BGEZoUVS2NFLYQs-dvSSFKMhu_pB76tzSNKGqXUngKVmEo-VmE_VRUcFek1zch7KCA/exec";
 
 // Kunci rahasia yang harus sama dengan di Google Apps Script
 const String kSecretKey = "secretkeyistwentyfour";
